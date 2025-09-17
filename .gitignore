@@ -1,0 +1,6 @@
+# Ignora virtual environment
+venv/
+env/
+
+# Ignora la cartella Data
+Data/
