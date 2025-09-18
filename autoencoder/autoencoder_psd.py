@@ -165,8 +165,7 @@ pazienza = 20
 # for dirpath, dirnames, filenames in os.walk(dirData):
 #     print(f"Directory: {dirpath}")
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-dirData = os.path.join(script_dir, 'Data')
+dirData = "Data"
 
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 

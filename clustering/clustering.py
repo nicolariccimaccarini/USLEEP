@@ -130,8 +130,7 @@ window_size = 5 # Lunghezza della finestra in secondi
 num_clusters = 3
 # pazienza = 5
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-dirData = os.path.join(script_dir, 'Data')
+dirData = "Data"
 cluster_path = os.path.join(dirData, "cluster")
 
 filenames = [f for f in os.listdir(cluster_path) if "edf" in f]

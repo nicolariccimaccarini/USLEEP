@@ -135,8 +135,7 @@ window_size = 5 # Lunghezza della finestra in secondi
 num_clusters = 2 #2 e 4
 
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-dirData = os.path.join(script_dir, 'Data')
+dirData = "Data"
 
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 

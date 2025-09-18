@@ -2,18 +2,19 @@ import subprocess
 import os
 import time
 import json
+import re
 from datetime import datetime
 
 def setup_environment():
     """Configura l'ambiente necessario per l'esecuzione degli script"""
     print("🔧 Configurazione ambiente...")
     
-    # Directory necessarie (percorsi corretti)
+    # Directory necessarie - SOLO quelle effettivamente necessarie
     required_dirs = [
-        "Data/Edf",           # Percorso corretto: Data è fuori da autoencoder
-        "Data/Output",
-        "clustering/Data",
-        "results"
+        "Data/Edf",           # Directory principale per file EDF
+        "Data/Output",        # Directory per output dei risultati
+        "results"             # Directory per risultati finali
+        # RIMOSSA: "clustering/Data" - non necessaria, clustering usa Data/Edf
     ]
     
     for dir_path in required_dirs:
@@ -23,22 +24,105 @@ def setup_environment():
         else:
             print(f"✅ Directory esistente: {dir_path}")
     
+    # Verifica che Data/Edf contenga file EDF
+    edf_path = "Data/Edf"
+    if os.path.exists(edf_path):
+        edf_files = [f for f in os.listdir(edf_path) if f.endswith('.edf')]
+        if edf_files:
+            print(f"📁 Trovati {len(edf_files)} file .edf in {edf_path}")
+        else:
+            print(f"⚠️  Nessun file .edf trovato in {edf_path}")
+            print(f"   Assicurati di aver copiato i file EDF nella directory corretta!")
+    
     print("🔧 Setup completato!\n")
+
+def extract_metrics(output):
+    """Estrae metriche dall'output degli script"""
+    metrics = {}
+    
+    if not output or output == "Script saltato - prerequisiti mancanti":
+        return metrics
+    
+    try:
+        # Pattern comuni per estrarre metriche dai log
+        patterns = {
+            'accuracy': [
+                r'accuracy[:\s]+([0-9]*\.?[0-9]+)',
+                r'Accuracy[:\s]+([0-9]*\.?[0-9]+)',
+                r'acc[:\s]+([0-9]*\.?[0-9]+)'
+            ],
+            'loss': [
+                r'loss[:\s]+([0-9]*\.?[0-9]+)',
+                r'Loss[:\s]+([0-9]*\.?[0-9]+)'
+            ],
+            'silhouette_score': [
+                r'silhouette[_\s]score[:\s]+([0-9]*\.?[0-9]+)',
+                r'Silhouette[_\s]Score[:\s]+([0-9]*\.?[0-9]+)'
+            ],
+            'precision': [
+                r'precision[:\s]+([0-9]*\.?[0-9]+)',
+                r'Precision[:\s]+([0-9]*\.?[0-9]+)'
+            ],
+            'recall': [
+                r'recall[:\s]+([0-9]*\.?[0-9]+)',
+                r'Recall[:\s]+([0-9]*\.?[0-9]+)'
+            ],
+            'f1_score': [
+                r'f1[_\s]score[:\s]+([0-9]*\.?[0-9]+)',
+                r'F1[_\s]Score[:\s]+([0-9]*\.?[0-9]+)'
+            ]
+        }
+        
+        # Cerca ogni metrica nell'output
+        for metric_name, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                matches = re.findall(pattern, output, re.IGNORECASE)
+                if matches:
+                    # Prendi l'ultimo valore trovato (spesso il più significativo)
+                    metrics[metric_name] = float(matches[-1])
+                    break
+        
+        # Pattern specifici per clustering (numero di cluster)
+        cluster_patterns = [
+            r'n_clusters[:\s]+([0-9]+)',
+            r'Number of clusters[:\s]+([0-9]+)',
+            r'Optimal K[:\s]+([0-9]+)'
+        ]
+        
+        for pattern in cluster_patterns:
+            matches = re.findall(pattern, output, re.IGNORECASE)
+            if matches:
+                metrics['n_clusters'] = int(matches[-1])
+                break
+        
+    except Exception as e:
+        print(f"⚠️  Errore nell'estrazione delle metriche: {e}")
+    
+    return metrics
 
 def check_script_prerequisites(script_path):
     """Verifica i prerequisiti per l'esecuzione di uno script"""
-    if "autoencoder/trasformazione.py" in script_path:
-        # Verifica esistenza directory Data/Edf (percorso corretto)
-        edf_path = "Data/Edf"  # Corretto: Data è al livello root del progetto
+    # Tutti gli script che lavorano con EDF usano la stessa directory
+    scripts_requiring_edf = [
+        "autoencoder/trasformazione.py",
+        "clustering/clustering.py",
+        "clustering/clustering_no_ae.py",
+        "clustering/k-means.py"
+    ]
+    
+    # Controlla se lo script richiede file EDF
+    if any(script in script_path for script in scripts_requiring_edf):
+        edf_path = "Data/Edf"  # Directory principale per tutti
+        
         if not os.path.exists(edf_path):
             print(f"❌ Directory mancante: {edf_path}")
             return False
         
-        # Verifica che ci siano file EDF
         try:
             edf_files = [f for f in os.listdir(edf_path) if f.endswith('.edf')]
             if not edf_files:
                 print(f"❌ Nessun file .edf trovato in {edf_path}")
+                print(f"   Copia i tuoi file EDF nella directory: {edf_path}")
                 return False
             else:
                 print(f"✅ Trovati {len(edf_files)} file .edf in {edf_path}")
@@ -138,7 +222,8 @@ def main():
         script_name = script.split('/')[-1]  # Solo nome file
         time_str = f"{data['execution_time']:.2f}" if data['execution_time'] > 0 else "N/A"
         status = "✓ OK" if data['success'] else "✗ FAIL"
-        metrics_summary = ", ".join([f"{k}: {v:.3f}" for k, v in data['metrics'].items()])
+        metrics_summary = ", ".join([f"{k}: {v:.3f}" if isinstance(v, float) else f"{k}: {v}" 
+                                   for k, v in data['metrics'].items()])
         
         print(f"{script_name:<40} {time_str:<12} {status:<10} {metrics_summary}")
     

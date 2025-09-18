@@ -136,8 +136,7 @@ silhouette_scores = []
 k_range = range(1, 11)
 
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-dirData = os.path.join(script_dir, 'Data')
+dirData = "Data"
 
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 
