@@ -54,7 +54,7 @@ Data/
 ## Setup Ambiente
 
 ```bash
-# Crea ambiente conda
+# Crea ambiente virtuale 
 python -m venv venv
 source venv/bin/activate
 
