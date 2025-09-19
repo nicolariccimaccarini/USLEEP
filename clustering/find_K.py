@@ -141,7 +141,9 @@ dirData = "Data"
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 
 # Path relativo alla cartella 'edf'
-path_edf = os.path.join(dirData, "Edf")
+path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
+output_path = os.environ.get('OUTPUT_PATH', 'Data')
+base_path = os.environ.get('BASE_PATH', '.')
 
 # print(f"percorso cartella edf {path_edf}")
 
@@ -160,7 +162,7 @@ if not os.path.exists(cluster_path):
 
 path_edf = os.path.join(dirData, "Edf")
 
-filenames = [f for f in os.listdir(path_edf) if "edf" in f]
+filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 
 # print(filenames)
 
