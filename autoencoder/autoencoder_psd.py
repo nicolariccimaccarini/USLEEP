@@ -195,7 +195,7 @@ if not os.path.exists(cluster_path):
 # print(f"percorso images_path = {images_path}")
 # print(f"percorso weights_path = {weights_path}")
 
-path_edf = os.path.join(dirData, "Temp")
+# path_edf = os.path.join(dirData, "Temp")
 
 filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 

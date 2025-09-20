@@ -1,0 +1,8 @@
+# Ignora virtual environment
+venv/
+env/
+winvenv/
+
+# Ignora la cartella Data
+Data/
+Edf_temp/
