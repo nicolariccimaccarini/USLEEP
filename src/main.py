@@ -46,12 +46,22 @@ class MLPipelineRunner:
             result = subprocess.run(
                 [sys.executable, script_to_run],
                 env=env,
-                cwd=working_dir
+                cwd=working_dir,
+                capture_output=True,
+                text=True
             )
             
             # Ripristina directory originale
             os.chdir(original_cwd)
             
+            if result.stdout:
+                print("📋 OUTPUT:")
+                print(result.stdout)
+
+            if result.stderr:
+                print("⚠️ ERRORI:")
+                print(result.stderr)
+
             if result.returncode == 0:
                 print(f"✅ {script_name} completato")
                 return True
