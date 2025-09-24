@@ -10,6 +10,18 @@ import tensorflow as tf
 from tensorflow.keras.models import Model 
 from tensorflow.keras.models import load_model
 
+def get_file_output_path(base_data_path, filename=None):
+    """Crea e restituisce il percorso per l'output specifico del file"""
+    if filename:
+        file_base_name = os.path.splitext(filename)[0]
+        file_output_path = os.path.join(base_data_path, file_base_name)
+        os.makedirs(os.path.join(file_output_path, "images"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "model"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "cluster"), exist_ok=True)
+        return file_output_path
+    else:
+        return base_data_path
+
 ### funzioni
 
 def checkMaxMin(data_normalized):
@@ -120,20 +132,27 @@ def check_overlap(segments, segment_length, overlap, sfreq):
 
 ##### script
 
-dirData = "Data/"
-dirEdf = "Data/Temp"
 segment_split_all = []
 overlap = 0.10  #percentuale di sovrapposzione
 window_size = 5 # Lunghezza della finestra in secondi
-# epoche = 1
-# batch_size = 2
 num_clusters = 3
-# pazienza = 5
 
-dirData = "Data"
-cluster_path = os.path.join(dirData, "cluster")
+# Path relativo alla cartella 'edf'
+path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
+output_path = os.environ.get('OUTPUT_PATH', 'Data')
+base_path = os.environ.get('BASE_PATH', '.')
+current_file = os.environ.get('CURRENT_FILE', None)
 
-filenames = [f for f in os.listdir(cluster_path) if "edf" in f]
+# Usa il percorso specifico del file se disponibile
+if current_file:
+    dirData = get_file_output_path(output_path, current_file)
+    # Per clustering, usa i file dalla cartella cluster del file corrente
+    cluster_path = os.path.join(dirData, "cluster")
+    filenames = [f for f in os.listdir(cluster_path) if "edf" in f]
+else:
+    dirData = output_path
+    cluster_path = os.path.join(dirData, "cluster")
+    filenames = [f for f in os.listdir(cluster_path) if "edf" in f]
 
 segment_split_temp = []
 
@@ -316,6 +335,6 @@ for cluster in range(num_clusters):
             plt.savefig(grafico_cluster_path, dpi=300, bbox_inches='tight')
             plt.close()
             # plt.show()
-            
+
 
 

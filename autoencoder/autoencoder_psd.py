@@ -174,34 +174,33 @@ path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
 output_path = os.environ.get('OUTPUT_PATH', 'Data')
 base_path = os.environ.get('BASE_PATH', '.')
 
-# print(f"percorso cartella edf {path_edf}")
+current_file = os.environ.get('CURRENT_FILE', None)
+
+def get_file_output_path(base_data_path, filename=None):
+    """Crea e restituisce il percorso per l'output specifico del file"""
+    if filename:
+        file_base_name = os.path.splitext(filename)[0]
+        file_output_path = os.path.join(base_data_path, file_base_name)
+        os.makedirs(os.path.join(file_output_path, "images"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "model"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "cluster"), exist_ok=True)
+        return file_output_path
+    else:
+        return base_data_path
+
+# Usa il percorso specifico del file se disponibile
+if current_file:
+    dirData = get_file_output_path(output_path, current_file)
+    filenames = [current_file]
+else:
+    dirData = output_path
+    filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 
 images_path = os.path.join(dirData, "images")
 weights_path = os.path.join(dirData, "model")
 cluster_path = os.path.join(dirData, "cluster")
 
-if not os.path.exists(images_path):
-    os.makedirs(images_path)
-    
-if not os.path.exists(weights_path):
-    os.makedirs(weights_path)
-
-if not os.path.exists(cluster_path):
-    os.makedirs(cluster_path)  
-
-
-# print(f"percorso dirData = {dirData}")
-# print(f"percorso dirEdf = {path_edf}")
-# print(f"percorso images_path = {images_path}")
-# print(f"percorso weights_path = {weights_path}")
-
-# path_edf = os.path.join(dirData, "Temp")
-
-filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
-
-# print(filenames)
-
-# Salvataggio del modello Keras
+# Aggiorna i percorsi dei modelli
 model_path = os.path.join(weights_path, 'autoencoder_psd_model.h5')
 grafico_app_path = os.path.join(images_path, 'grafico_apprendimento_psd.png')
 grafico_cluster_path = os.path.join(images_path, 'grafico_cluster_psd.png')
