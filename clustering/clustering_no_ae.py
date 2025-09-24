@@ -10,6 +10,17 @@ import tensorflow as tf
 from tensorflow.keras.models import Model 
 from tensorflow.keras.models import load_model
 
+def get_file_output_path(base_data_path, filename=None):
+    """Crea e restituisce il percorso per l'output specifico del file"""
+    if filename:
+        file_base_name = os.path.splitext(filename)[0]
+        file_output_path = os.path.join(base_data_path, file_base_name)
+        os.makedirs(os.path.join(file_output_path, "images"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "model"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "cluster"), exist_ok=True)
+        return file_output_path
+    else:
+        return base_data_path
 
 ### funzioni
 
@@ -123,28 +134,28 @@ def check_overlap(segments, segment_length, overlap, sfreq):
 
 ##### script
 
-#file_path = "Data/Sartini_Daisy/SARTINI^DAISY.edf"
-
 # all_data = []
-dirData = "Data/" #dirEdf = "Data/Edf"
-dirEdf = "Data/Edf"
-dirEdf = "Data/Temp"
 segment_split_all = []
 overlap = 0.10   #percentuale di sovrapposzione
 window_size = 5 # Lunghezza della finestra in secondi
 num_clusters = 2 #2 e 4
 
-
-dirData = "Data"
-
-# dirData = os.path.abspath('Data') #<-- corretto il percorso 
-
 # Path relativo alla cartella 'edf'
 path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
 output_path = os.environ.get('OUTPUT_PATH', 'Data')
 base_path = os.environ.get('BASE_PATH', '.')
+current_file = os.environ.get('CURRENT_FILE', None)
 
-# print(f"percorso cartella edf {path_edf}")
+# Usa il percorso specifico del file se disponibile
+if current_file:
+    dirData = get_file_output_path(output_path, current_file)
+    # Per clustering_no_ae, usa i file dalla cartella cluster del file corrente
+    path_edf = os.path.join(dirData, "cluster")
+    filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
+else:
+    dirData = output_path
+    path_edf = os.path.join(dirData, "cluster")
+    filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 
 images_path = os.path.join(dirData, "images")
 weights_path = os.path.join(dirData, "model")
@@ -163,12 +174,6 @@ if not os.path.exists(cluster_path):
 
 if not os.path.exists(images_clus_path):
     os.makedirs(images_clus_path)
-
-path_edf = os.path.join(dirData, "cluster")
-
-filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
-
-# print(filenames)
 
 # Salvataggio del modello Keras
 model_path = os.path.join(weights_path, 'autoencoder_model.h5')
@@ -321,4 +326,3 @@ for cluster in range(num_clusters):
         plt.savefig(grafico_cluster_path, dpi=300, bbox_inches='tight')
         plt.close()
         # plt.show()
-        
