@@ -15,6 +15,18 @@ from tensorflow.keras.layers import Input, LSTM, RepeatVector, TimeDistributed, 
 from tensorflow.keras.models import load_model
 import gc
 
+# Configura TensorFlow per usare la memoria GPU in modo graduale
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"✅ Configurate {len(gpus)} GPU con crescita memoria graduale")
+    except RuntimeError as e:
+        print(f"⚠️ Errore configurazione GPU: {e}")
+
+batch_size = 8 
+epoche = 50        
 
 
 ### funzioni
@@ -180,7 +192,7 @@ dirData = "Data"
 
 # Path relativo alla cartella 'edf'
 path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
-output_path = os.environ.get('OUTPUT_PATH', 'Data')
+output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
 base_path = os.environ.get('BASE_PATH', '.')
 current_file = os.environ.get('CURRENT_FILE', None)
 
@@ -345,6 +357,19 @@ for channel, data in aggregated_data.items():
     # Salvataggio del modello
     autoencoder.save(channel_weights_path)  
     autoencoder = None
+    gc.collect()
+
+    # Controlla memoria GPU prima di iniziare
+    if gpus:
+        gpu_info = tf.config.experimental.get_memory_info('GPU:0')
+        print(f"💾 GPU Memory - Current: {gpu_info['current']/1024**3:.2f}GB, Peak: {gpu_info['peak']/1024**3:.2f}GB")
+    
+    # Libera memoria dopo ogni canale
+    tf.keras.backend.clear_session()
+    if gpus:
+        tf.config.experimental.reset_memory_stats('GPU:0')
+    
+    import gc
     gc.collect()
 
 
