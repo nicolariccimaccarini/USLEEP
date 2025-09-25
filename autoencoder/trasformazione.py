@@ -134,8 +134,8 @@ dirEdf = "Data/Temp"
 segment_split_all = []
 overlap = 0.10   #percentuale di sovrapposzione
 window_size = 5 # Lunghezza della finestra in secondi
-epoche = 60
-batch_size = 512
+epoche = 30
+batch_size = 128
 num_clusters = 5
 pazienza = 5
 

@@ -156,8 +156,8 @@ dirEdf = "Data/Temp"
 psd_all = []
 overlap = 0.10   #percentuale di sovrapposzione
 window_size = 5 # Lunghezza della finestra in secondi
-epoche = 200
-batch_size = 16
+epoche = 50     # Ridotto da 200 per test iniziali
+batch_size = 8  # Ridotto da 16
 num_clusters = 5
 pazienza = 20
 
