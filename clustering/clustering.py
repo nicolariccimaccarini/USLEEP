@@ -139,7 +139,7 @@ num_clusters = 3
 
 # Path relativo alla cartella 'edf'
 path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
-output_path = os.environ.get('OUTPUT_PATH', 'Data')
+output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
 base_path = os.environ.get('BASE_PATH', '.')
 current_file = os.environ.get('CURRENT_FILE', None)
 

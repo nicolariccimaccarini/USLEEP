@@ -180,7 +180,7 @@ dirData = "Data"
 
 # Path relativo alla cartella 'edf'
 path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
-output_path = os.environ.get('OUTPUT_PATH', 'Data')
+output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
 base_path = os.environ.get('BASE_PATH', '.')
 
 # print(f"percorso cartella edf {path_edf}")

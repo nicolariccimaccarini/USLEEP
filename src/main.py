@@ -7,7 +7,9 @@ class MLPipelineRunner:
     def __init__(self):
         self.base_path = "/hpc/home/nmaccarini/ML-for-Spindle-Detection-in-EEESWAS/"
         self.data_path = os.path.join(self.base_path, "Data/Edf")
-        self.output_path = os.path.join(self.base_path, "Data")
+        self.output_path = os.path.join(self.base_path, "Data/Output")
+
+        os.makedirs(self.output_path, exist_ok=True)
         
     def run_script(self, script_path, script_name, current_file=None):
         """Esegue uno script Python"""
