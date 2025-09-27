@@ -186,7 +186,7 @@ scaler = MinMaxScaler()
 # for dirpath, dirnames, filenames in os.walk(dirData):
 #     print(f"Directory: {dirpath}")
 
-dirData = "Data"
+# dirData = "Data"
 
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 

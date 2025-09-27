@@ -174,7 +174,7 @@ scaler = MinMaxScaler()
 # for dirpath, dirnames, filenames in os.walk(dirData):
 #     print(f"Directory: {dirpath}")
 
-dirData = "Data"
+# dirData = "Data"
 
 # dirData = os.path.abspath('Data') #<-- corretto il percorso 
 
@@ -182,6 +182,27 @@ dirData = "Data"
 path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
 output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
 base_path = os.environ.get('BASE_PATH', '.')
+current_file = os.environ.get('CURRENT_FILE', None)
+
+def get_file_output_path(base_data_path, filename=None):
+    """Crea e restituisce il percorso per l'output specifico del file"""
+    if filename:
+        file_base_name = os.path.splitext(filename)[0]
+        file_output_path = os.path.join(base_data_path, file_base_name)
+        os.makedirs(os.path.join(file_output_path, "images", "canali_individuali_sovrapposti"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "model", "canali_individuali_sovrapposti"), exist_ok=True)
+        os.makedirs(os.path.join(file_output_path, "cluster"), exist_ok=True)
+        return file_output_path
+    else:
+        return base_data_path
+
+# Usa il percorso specifico del file se disponibile
+if current_file:
+    dirData = get_file_output_path(output_path, current_file)
+    filenames = [current_file]
+else:
+    dirData = output_path
+    filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 
 # print(f"percorso cartella edf {path_edf}")
 
@@ -210,7 +231,7 @@ if not os.path.exists(grafico_apprendimento_path):
 # path_edf = os.path.join(dirData, "Temp")
 # selected_channels = ['EEG Fp1', 'EEG Fp2']
 
-filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
+# filenames = [f for f in os.listdir(path_edf) if "edf" in f.lower()]
 
 aggregated_data = {}
 
