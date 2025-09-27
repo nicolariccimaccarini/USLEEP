@@ -87,11 +87,11 @@ class MLPipelineRunner:
             ("autoencoder/trasformazione.py", "Trasformazione Autoencoder"),
             ("autoencoder/autoencoder_psd.py", "Autoencoder PSD"),
             ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
-            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
-            ("clustering/find_K.py", "Find K Clustering"),
-            ("clustering/clustering.py", "Clustering"),
-            ("clustering/clustering_no_ae.py", "Clustering No AE"),
-            ("clustering/k-means.py", "K-Means"),
+            # ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
+            # ("clustering/find_K.py", "Find K Clustering"),
+            # ("clustering/clustering.py", "Clustering"),
+            # ("clustering/clustering_no_ae.py", "Clustering No AE"),
+            # ("clustering/k-means.py", "K-Means"),
             ("src/calcolo_acc.py", "Calcolo Accuratezza")
         ]
         
