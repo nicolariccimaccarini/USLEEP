@@ -84,15 +84,15 @@ class MLPipelineRunner:
         """Esegue tutti gli script nell'ordine per ogni file EDF"""
         scripts = [
             ("src/letturaEDF.py", "Lettura EDF"),
-            ("autoencoder/trasformazione.py", "Trasformazione Autoencoder"),
-            ("autoencoder/autoencoder_psd.py", "Autoencoder PSD"),
+            # ("autoencoder/trasformazione.py", "Trasformazione Autoencoder"),
+            # ("autoencoder/autoencoder_psd.py", "Autoencoder PSD"),
             ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
-            # ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
+            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
             # ("clustering/find_K.py", "Find K Clustering"),
             # ("clustering/clustering.py", "Clustering"),
             # ("clustering/clustering_no_ae.py", "Clustering No AE"),
             # ("clustering/k-means.py", "K-Means"),
-            ("src/calcolo_acc.py", "Calcolo Accuratezza")
+            # ("src/calcolo_acc.py", "Calcolo Accuratezza")
         ]
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
