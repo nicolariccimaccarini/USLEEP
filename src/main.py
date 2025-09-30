@@ -83,7 +83,7 @@ class MLPipelineRunner:
     def run_pipeline(self):
         """Esegue tutti gli script nell'ordine per ogni file EDF"""
         scripts = [
-            ("src/letturaEDF.py", "Lettura EDF"),
+            # ("src/letturaEDF.py", "Lettura EDF"),
             # ("autoencoder/trasformazione.py", "Trasformazione Autoencoder"),
             # ("autoencoder/autoencoder_psd.py", "Autoencoder PSD"),
             ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
