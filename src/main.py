@@ -5,7 +5,7 @@ from datetime import datetime
 
 class MLPipelineRunner:
     def __init__(self):
-        self.base_path = "/hpc/home/nmaccarini/ML-for-Spindle-Detection-in-EEESWAS/"
+        self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
         self.data_path = os.path.join(self.base_path, "Data/Edf")
         self.output_path = os.path.join(self.base_path, "Data/Output")
 
