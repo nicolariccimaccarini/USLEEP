@@ -93,32 +93,28 @@ class MLPipelineRunner:
 
     def run_pipeline(self):
         scripts = [
-            # ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
-            # ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
-            ("clustering/clustering.py", "Clustering post Autoencoder")
+            ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
+            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD")
         ]
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Modalità job array: processa solo il file specificato
-        if self.current_file:
-            edf_files = [self.current_file]
-            print(f"📋 Modalità job array - processando: {self.current_file}")
-        else:
-            # Modalità normale: processa tutti i file
-            edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
-            print(f"📋 Modalità normale - {len(edf_files)} file trovati")
+        edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
+        
+        if not edf_files:
+            print("❌ Nessun file EDF trovato!")
+            return
         
         total_successful = 0
         files_processed = 0
         files_skipped = 0
         
         for edf_file in edf_files:
-            # if self.output_exists(edf_file):
-            #     output_folder = self.get_output_folder_name(edf_file)
-            #     print(f"\n⏭️ File {edf_file} già processato (cartella {output_folder} esistente). Saltando...")
-            #     files_skipped += 1
-            #     continue
+            if self.output_exists(edf_file):
+                output_folder = self.get_output_folder_name(edf_file)
+                print(f"\n⏭️ File {edf_file} già processato (cartella {output_folder} esistente). Saltando...")
+                files_skipped += 1
+                continue
             
             print(f"\n🔄 Processando file: {edf_file}")
             files_processed += 1
