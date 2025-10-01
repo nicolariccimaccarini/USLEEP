@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import datetime
 
+
 class MLPipelineRunner:
     def __init__(self):
         self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
@@ -10,7 +11,20 @@ class MLPipelineRunner:
         self.output_path = os.path.join(self.base_path, "Data/Output")
 
         os.makedirs(self.output_path, exist_ok=True)
-        
+
+
+    def get_output_folder_name(self, edf_file):
+        """Genera il nome della cartella di output basato sul file EDF"""
+        return os.path.splitext(edf_file)[0]
+
+
+    def output_exists(self, edf_file):
+        """Controlla se esiste già una cartella di output per il file EDF"""
+        output_folder = self.get_output_folder_name(edf_file)
+        output_folder_path = os.path.join(self.output_path, output_folder)
+        return os.path.exists(output_folder_path) and os.path.isdir(output_folder_path)
+
+
     def run_script(self, script_path, script_name, current_file=None):
         """Esegue uno script Python"""
         print(f"\n{'='*60}")
@@ -20,17 +34,14 @@ class MLPipelineRunner:
         print(f"{'='*60}")
         
         full_path = os.path.join(self.base_path, script_path)
-        
-        # Verifica che il file esista
+
         if not os.path.exists(full_path):
             print(f"❌ ERRORE: File non trovato: {full_path}")
             return False
         
-        # Salva directory corrente
         original_cwd = os.getcwd()
         
         try:
-            # Vai nella directory dello script
             if script_path.startswith('src/'):
                 working_dir = self.base_path
                 script_to_run = script_path
@@ -40,7 +51,6 @@ class MLPipelineRunner:
             
             os.chdir(working_dir)
             
-            # Prepara variabili d'ambiente
             env = os.environ.copy()
             env['DATA_PATH'] = self.data_path
             env['OUTPUT_PATH'] = self.output_path
@@ -48,7 +58,6 @@ class MLPipelineRunner:
             if current_file:
                 env['CURRENT_FILE'] = current_file
             
-            # Esegui lo script
             result = subprocess.run(
                 [sys.executable, script_to_run],
                 env=env,
@@ -57,7 +66,6 @@ class MLPipelineRunner:
                 text=True
             )
             
-            # Ripristina directory originale
             os.chdir(original_cwd)
             
             if result.stdout:
@@ -80,24 +88,16 @@ class MLPipelineRunner:
             print(f"❌ Errore durante l'esecuzione: {str(e)}")
             return False
     
+
     def run_pipeline(self):
         """Esegue tutti gli script nell'ordine per ogni file EDF"""
         scripts = [
-            # ("src/letturaEDF.py", "Lettura EDF"),
-            # ("autoencoder/trasformazione.py", "Trasformazione Autoencoder"),
-            # ("autoencoder/autoencoder_psd.py", "Autoencoder PSD"),
             ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
-            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
-            # ("clustering/find_K.py", "Find K Clustering"),
-            # ("clustering/clustering.py", "Clustering"),
-            # ("clustering/clustering_no_ae.py", "Clustering No AE"),
-            # ("clustering/k-means.py", "K-Means"),
-            # ("src/calcolo_acc.py", "Calcolo Accuratezza")
+            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD")
         ]
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Ottieni lista dei file EDF
         edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
         
         if not edf_files:
@@ -105,9 +105,18 @@ class MLPipelineRunner:
             return
         
         total_successful = 0
+        files_processed = 0
+        files_skipped = 0
         
         for edf_file in edf_files:
+            if self.output_exists(edf_file):
+                output_folder = self.get_output_folder_name(edf_file)
+                print(f"\n⏭️ File {edf_file} già processato (cartella {output_folder} esistente). Saltando...")
+                files_skipped += 1
+                continue
+            
             print(f"\n🔄 Processando file: {edf_file}")
+            files_processed += 1
             
             successful = 0
             for script_path, script_name in scripts:
@@ -122,11 +131,16 @@ class MLPipelineRunner:
             print(f"\n📊 File {edf_file} completato: {successful}/{len(scripts)} script eseguiti con successo")
             total_successful += successful
         
-        print(f"\n🎉 Pipeline completata: {total_successful}/{len(scripts) * len(edf_files)} script totali eseguiti con successo")
+        print(f"\n🎉 Pipeline completata:")
+        print(f"   📁 File processati: {files_processed}")
+        print(f"   ⏭️ File saltati (già processati): {files_skipped}")
+        print(f"   ✅ Script eseguiti con successo: {total_successful}/{len(scripts) * files_processed}")
+
 
 def main():
     runner = MLPipelineRunner()
     runner.run_pipeline()
+
 
 if __name__ == "__main__":
     main()
