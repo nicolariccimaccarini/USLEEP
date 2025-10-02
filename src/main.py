@@ -7,7 +7,6 @@ from datetime import datetime
 class MLPipelineRunner:
     def __init__(self):
         self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
-        # self.base_path = "/mnt/c/Users/nicol/OneDrive/Documenti/GitHub/ML-for-Spindle-Detection-in-EEESWAS"
         self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Edf"))
         self.output_path = os.environ.get('OUTPUT_PATH', os.path.join(self.base_path, "Data/Output"))
         self.current_file = os.environ.get('CURRENT_FILE', None)
@@ -99,11 +98,14 @@ class MLPipelineRunner:
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
-        
-        if not edf_files:
-            print("❌ Nessun file EDF trovato!")
-            return
+        # Modalità job array: processa solo il file specificato
+        if self.current_file:
+            edf_files = [self.current_file]
+            print(f"📋 Modalità job array - processando: {self.current_file}")
+        else:
+            # Modalità normale: processa tutti i file
+            edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
+            print(f"📋 Modalità normale - {len(edf_files)} file trovati")
         
         total_successful = 0
         files_processed = 0
