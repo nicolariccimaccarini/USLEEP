@@ -7,8 +7,9 @@ from datetime import datetime
 class MLPipelineRunner:
     def __init__(self):
         self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
-        self.data_path = os.path.join(self.base_path, "Data/Edf")
-        self.output_path = os.path.join(self.base_path, "Data/Output")
+        self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Edf"))
+        self.output_path = os.environ.get('OUTPUT_PATH', os.path.join(self.base_path, "Data/Output"))
+        self.current_file = os.environ.get('CURRENT_FILE', None)
 
         os.makedirs(self.output_path, exist_ok=True)
 
@@ -90,7 +91,6 @@ class MLPipelineRunner:
     
 
     def run_pipeline(self):
-        """Esegue tutti gli script nell'ordine per ogni file EDF"""
         scripts = [
             ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
             ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD")
@@ -98,11 +98,14 @@ class MLPipelineRunner:
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
-        
-        if not edf_files:
-            print("❌ Nessun file EDF trovato!")
-            return
+        # Modalità job array: processa solo il file specificato
+        if self.current_file:
+            edf_files = [self.current_file]
+            print(f"📋 Modalità job array - processando: {self.current_file}")
+        else:
+            # Modalità normale: processa tutti i file
+            edf_files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.edf')]
+            print(f"📋 Modalità normale - {len(edf_files)} file trovati")
         
         total_successful = 0
         files_processed = 0
@@ -124,8 +127,14 @@ class MLPipelineRunner:
                 if success:
                     successful += 1
                 else:
-                    response = input(f"\n⚠️ {script_name} fallito per {edf_file}. Continuare con questo file? (y/n): ")
-                    if response.lower() not in ['y', 'yes']:
+                    # Solo in modalità interattiva
+                    if not self.current_file:
+                        response = input(f"\n⚠️ {script_name} fallito per {edf_file}. Continuare? (y/n): ")
+                        if response.lower() not in ['y', 'yes']:
+                            break
+                    else:
+                        # In job array, interrompi se fallisce
+                        print(f"❌ {script_name} fallito per {edf_file}. Interruzione.")
                         break
             
             print(f"\n📊 File {edf_file} completato: {successful}/{len(scripts)} script eseguiti con successo")
