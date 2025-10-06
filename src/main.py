@@ -7,6 +7,7 @@ from datetime import datetime
 class MLPipelineRunner:
     def __init__(self):
         self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
+        # self.base_path = "/mnt/c/Users/nicol/OneDrive/Documenti/GitHub/ML-for-Spindle-Detection-in-EEESWAS"
         self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Edf"))
         self.output_path = os.environ.get('OUTPUT_PATH', os.path.join(self.base_path, "Data/Output"))
         self.current_file = os.environ.get('CURRENT_FILE', None)
@@ -92,8 +93,9 @@ class MLPipelineRunner:
 
     def run_pipeline(self):
         scripts = [
-            ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
-            ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD")
+            # ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
+            # ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
+            ("clustering/clustering.py", "Clustering psot Autoencoder")
         ]
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -112,11 +114,11 @@ class MLPipelineRunner:
         files_skipped = 0
         
         for edf_file in edf_files:
-            if self.output_exists(edf_file):
-                output_folder = self.get_output_folder_name(edf_file)
-                print(f"\n⏭️ File {edf_file} già processato (cartella {output_folder} esistente). Saltando...")
-                files_skipped += 1
-                continue
+            # if self.output_exists(edf_file):
+            #     output_folder = self.get_output_folder_name(edf_file)
+            #     print(f"\n⏭️ File {edf_file} già processato (cartella {output_folder} esistente). Saltando...")
+            #     files_skipped += 1
+            #     continue
             
             print(f"\n🔄 Processando file: {edf_file}")
             files_processed += 1
