@@ -252,49 +252,7 @@ eeg_segments = np.expand_dims(all_segments_standardized, axis=-1)
 
 
 ###caricamento dell'autoencoder
-def load_autoencoder_model():
-    """Carica il modello autoencoder con fallback alla ricostruzione"""
-    
-    # Prova prima il modello ricostruito
-    rebuilt_path = os.path.join(weights_path, 'autoencoder_model_rebuilt.h5')
-    if os.path.exists(rebuilt_path):
-        try:
-            print(f"🔄 Caricamento modello ricostruito: {rebuilt_path}")
-            autoencoder = load_model(rebuilt_path)
-            print("✅ Modello ricostruito caricato con successo")
-            return autoencoder
-        except Exception as e:
-            print(f"⚠️ Caricamento modello ricostruito fallito: {e}")
-    
-    # Fallback: ricostruisci il modello e carica i pesi
-    print("🔧 Ricostruzione del modello...")
-    
-    try:
-        # Importa la funzione di ricostruzione
-        import sys
-        sys.path.append(os.path.join(base_path, 'src'))
-        from rebuild_autoencoder import create_autoencoder_architecture
-        
-        autoencoder = create_autoencoder_architecture()
-        autoencoder.load_weights(model_path)
-        print("✅ Modello ricostruito e pesi caricati")
-        
-        # Salva il modello ricostruito per usi futuri
-        autoencoder.save(rebuilt_path)
-        print(f"💾 Modello ricostruito salvato in: {rebuilt_path}")
-        
-        return autoencoder
-        
-    except Exception as e:
-        print(f"❌ Ricostruzione fallita: {e}")
-        raise
-
-# Sostituisci la sezione di caricamento del modello:
-try:
-    autoencoder = load_autoencoder_model()
-except Exception as e:
-    print(f"❌ Errore nel caricamento del modello: {e}")
-    exit(1)
+autoencoder = load_model(model_path, safe_mode=False)
 
 autoencoder.summary()
 
