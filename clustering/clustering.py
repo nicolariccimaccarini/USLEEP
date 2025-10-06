@@ -134,7 +134,7 @@ def check_overlap(segments, segment_length, overlap, sfreq):
 
 segment_split_all = []
 overlap = 0.10  #percentuale di sovrapposzione
-window_size = 5 # Lunghezza della finestra in secondi
+window_size = 15 # Lunghezza della finestra in secondi
 num_clusters = 3
 
 # Path relativo alla cartella 'edf'
@@ -146,18 +146,18 @@ current_file = os.environ.get('CURRENT_FILE', None)
 # Usa il percorso specifico del file se disponibile
 if current_file:
     dirData = get_file_output_path(output_path, current_file)
-    # Per clustering, usa i file dalla cartella cluster del file corrente
-    cluster_path = os.path.join(dirData, "cluster")
-    filenames = [f for f in os.listdir(cluster_path) if "edf" in f]
+    # Per clustering, usa solo il file corrente dalla cartella EDF originale
+    filenames = [current_file]  # Processa solo il file corrente
+    print(f"Modalità file singolo: processando {current_file}")
 else:
     dirData = output_path
-    cluster_path = os.path.join(dirData, "cluster")
-    filenames = [f for f in os.listdir(cluster_path) if "edf" in f]
+    filenames = [f for f in os.listdir(path_edf) if "edf" in f]
+    print(f"Modalità batch: processando {len(filenames)} file")
 
 segment_split_temp = []
 
 images_path = os.path.join(dirData, "images")
-weights_path = os.path.join(dirData, "model")
+weights_path = os.path.join(base_path, 'Data', 'weights')
 
 images_clus_path = os.path.join(images_path, "clustering")
 
@@ -168,7 +168,17 @@ if not os.path.exists(images_clus_path):
 
 for file in filenames:
     if file.endswith('.edf'):  # Controlla se il file ha estensione .edf
-        file_path = os.path.join(cluster_path, file) 
+        # Quando current_file è specificato, leggi dalla cartella EDF originale
+        if current_file:
+            file_path = os.path.join(path_edf, file)
+        else:
+            # In modalità batch, usa il cluster path se esiste, altrimenti EDF originale
+            cluster_path = os.path.join(dirData, "cluster")
+            if os.path.exists(os.path.join(cluster_path, file)):
+                file_path = os.path.join(cluster_path, file)
+            else:
+                file_path = os.path.join(path_edf, file)
+        
         print(f"\tFile: {file_path}")
         #raw = mne.io.read_raw_edf(file_path, preload=True)
 
@@ -237,7 +247,7 @@ eeg_segments = np.expand_dims(all_segments_standardized, axis=-1)
 
 
 ###caricamento dell'autoencoder
-autoencoder = load_model(model_path)
+autoencoder = load_model(model_path, safe_mode=False)
 
 autoencoder.summary()
 
