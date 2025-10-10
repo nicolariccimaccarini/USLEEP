@@ -331,16 +331,48 @@ for cluster in range(num_clusters):
 
     # selected_segment = all_segment[selected_index]
 
+    try:
+        # Get unique clusters and their counts
+        unique_clusters = np.unique(cluster_labels)  # Changed from 'labels' to 'cluster_labels'
+        print(f"Cluster univoci trovati: {unique_clusters}")
+        print(f"Numero totale segmenti: {len(all_segment)}")
+        
+        selected_segments = []
+        for cluster_id in unique_clusters:
+            # Find indices for this cluster
+            cluster_indices_for_id = np.where(cluster_labels == cluster_id)[0]  # Changed from 'labels' to 'cluster_labels'
+            
+            # Ensure we have valid indices
+            valid_indices = cluster_indices_for_id[cluster_indices_for_id < len(all_segment)]
+            
+            if len(valid_indices) > 0:
+                # Select the first valid segment for this cluster
+                selected_index = valid_indices[0]
+                selected_segment = all_segment[selected_index]
+                selected_segments.append(selected_segment)
+                print(f"Cluster {cluster_id}: selezionato segmento {selected_index}")
+            else:
+                print(f"Warning: Nessun segmento valido trovato per cluster {cluster_id}")
+        
+    except IndexError as e:
+        print(f"Errore nell'accesso ai segmenti: {e}")
+        print(f"Cluster_labels shape: {cluster_labels.shape if hasattr(cluster_labels, 'shape') else len(cluster_labels)}")
+        print(f"All_segment length: {len(all_segment)}")
+        print(f"Selected_index: {selected_index if 'selected_index' in locals() else 'Not defined'}")
+        raise
+
     for i, selected_index in enumerate(selected_indices):
+        # Check if selected_index is within bounds
+        if selected_index >= len(all_segment):
+            print(f"Warning: selected_index {selected_index} out of bounds for all_segment (length: {len(all_segment)})")
+            continue
+            
         # Seleziona il segmento corrente
         selected_segment = all_segment[selected_index]
         
         segment_length_actual = selected_segment.shape[1]
         time_array = np.arange(0, segment_length_actual) / sfreq
 
-        segment_length_actual = selected_segment.shape[1]
-
-        time_array = np.arange(0, segment_length_actual) / sfreq
         # Visualizza i segnali di tutti i canali
         for channel in range(len(channel_names)):  # Supponiamo di avere 26 canali
             plt.figure(figsize=(12, 6))
