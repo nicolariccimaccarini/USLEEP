@@ -10,6 +10,11 @@ import tensorflow as tf
 from tensorflow.keras.models import Model 
 from tensorflow.keras.models import load_model
 
+# Abilita la deserializzazione unsafe per i layer Lambda
+tf.keras.config.enable_unsafe_deserialization()
+
+print(f"Versione TensorFlow: {tf.__version__}")
+
 def get_file_output_path(base_data_path, filename=None):
     """Crea e restituisce il percorso per l'output specifico del file"""
     if filename:
@@ -247,7 +252,13 @@ eeg_segments = np.expand_dims(all_segments_standardized, axis=-1)
 
 
 ###caricamento dell'autoencoder
-autoencoder = load_model(model_path, safe_mode=False)
+try:
+    autoencoder = load_model(model_path, safe_mode=False)
+    print("✅ Modello caricato con successo")
+except Exception as e:
+    print(f"❌ Errore nel caricamento del modello: {e}")
+    print("Verifica che il file del modello sia integro e compatibile")
+    exit(1)
 
 autoencoder.summary()
 
