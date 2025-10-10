@@ -95,7 +95,7 @@ class MLPipelineRunner:
         scripts = [
             # ("autoencoder/autoencoder_CI_psd.py", "Autoencoder CI PSD"),
             # ("autoencoder/autoencoder_CI_sovra_psd.py", "Autoencoder CI Sovra PSD"),
-            ("clustering/clustering.py", "Clustering psot Autoencoder")
+            ("clustering/clustering.py", "Clustering post Autoencoder")
         ]
         
         print(f"🚀 Avvio pipeline ML - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
