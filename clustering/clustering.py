@@ -252,7 +252,13 @@ eeg_segments = np.expand_dims(all_segments_standardized, axis=-1)
 
 
 ###caricamento dell'autoencoder
-autoencoder = load_model(model_path, safe_mode=False)
+try:
+    autoencoder = load_model(model_path, safe_mode=False)
+    print("✅ Modello caricato con successo")
+except Exception as e:
+    print(f"❌ Errore nel caricamento del modello: {e}")
+    print("Verifica che il file del modello sia integro e compatibile")
+    exit(1)
 
 autoencoder.summary()
 
