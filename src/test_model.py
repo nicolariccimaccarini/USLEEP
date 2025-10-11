@@ -7,7 +7,7 @@ print(f"Versione TensorFlow: {tf.__version__}")
 tf.keras.config.enable_unsafe_deserialization()
 
 try:
-    with h5py.File('Data/weights/autoencoder_model.h5', 'r') as f:
+    with h5py.File('Data/weights/autoencoder_model_rebuilt.h5', 'r') as f:
         print("Il file è integro.")
         
         # Verifica la struttura del file
@@ -39,7 +39,7 @@ print("--- Test caricamento modello con deserializzazione unsafe abilitata ---")
 
 try:
     print("Tentativo 1: Caricamento con unsafe deserialization abilitata...")
-    model = tf.keras.models.load_model('Data/weights/autoencoder_model.h5', safe_mode=False)
+    model = tf.keras.models.load_model('Data/weights/autoencoder_model_rebuilt.h5', safe_mode=False)
     print("✅ Caricamento riuscito!")
     print(f"Modello caricato: {model.__class__.__name__}")
 except Exception as e:
@@ -47,7 +47,7 @@ except Exception as e:
 
 try:
     print("\nTentativo 2: Caricamento con compile=False e unsafe deserialization...")
-    model = tf.keras.models.load_model('Data/weights/autoencoder_model.h5', compile=False, safe_mode=False)
+    model = tf.keras.models.load_model('Data/weights/autoencoder_model_rebuilt.h5', compile=False, safe_mode=False)
     print("✅ Caricamento riuscito!")
     print(f"Modello caricato: {model.__class__.__name__}")
 except Exception as e:
