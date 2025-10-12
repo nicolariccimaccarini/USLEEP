@@ -1,0 +1,10 @@
+Classification Report - Paziente 64
+==================================================
+              precision    recall  f1-score   support
+
+           0       0.11      0.27      0.16        44
+           1       0.90      0.75      0.82       376
+
+    accuracy                           0.70       420
+   macro avg       0.51      0.51      0.49       420
+weighted avg       0.82      0.70      0.75       420

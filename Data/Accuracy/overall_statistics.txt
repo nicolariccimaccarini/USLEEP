@@ -1,0 +1,238 @@
+=== STATISTICHE GENERALI - TUTTI I PAZIENTI ===
+============================================================
+
+Numero di pazienti processati: 99
+Accuratezza media globale: 0.5217
+Accuratezza massima globale: 0.9968
+Accuratezza minima globale: 0.0159
+
+=== STATISTICHE PER CANALE ===
+------------------------------------------------------------
+
+Canale EEGA1:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5196
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGA2:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5196
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGC3:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5322
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGC4:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5204
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGCz:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5268
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGF3:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5401
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGF4:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5372
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGF7:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5352
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGF8:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5352
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGFp1:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5324
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGFp2:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5417
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGFz:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5392
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGO1:
+  Pazienti con dati: 99
+  Accuratezza media: 0.4936
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGO2:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5014
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGP3:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5011
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGP4:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5168
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGPz:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5133
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGT3:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5221
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGT4:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5227
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGT5:
+  Pazienti con dati: 99
+  Accuratezza media: 0.4992
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+Canale EEGT6:
+  Pazienti con dati: 99
+  Accuratezza media: 0.5058
+  Accuratezza massima: 1.0000
+  Accuratezza minima: 0.0000
+
+============================================================
+Accuratezze globali individuali:
+  Paziente 1: 0.5587
+  Paziente 2: 0.3193
+  Paziente 3: 0.5000
+  Paziente 4: 0.6012
+  Paziente 5: 0.5000
+  Paziente 6: 0.5000
+  Paziente 7: 0.5000
+  Paziente 8: 0.5000
+  Paziente 9: 0.5238
+  Paziente 10: 0.7024
+  Paziente 11: 0.3559
+  Paziente 12: 0.8542
+  Paziente 13: 0.5000
+  Paziente 14: 0.5000
+  Paziente 15: 0.5918
+  Paziente 16: 0.5536
+  Paziente 17: 0.5000
+  Paziente 18: 0.6984
+  Paziente 19: 0.3934
+  Paziente 20: 0.5051
+  Paziente 21: 0.1175
+  Paziente 22: 0.9524
+  Paziente 23: 0.5000
+  Paziente 24: 0.5000
+  Paziente 25: 0.5000
+  Paziente 26: 0.5000
+  Paziente 27: 0.6698
+  Paziente 28: 0.5690
+  Paziente 29: 0.8185
+  Paziente 30: 0.6241
+  Paziente 31: 0.0159
+  Paziente 32: 0.5733
+  Paziente 33: 0.5693
+  Paziente 34: 0.4377
+  Paziente 35: 0.5000
+  Paziente 36: 0.5000
+  Paziente 37: 0.5938
+  Paziente 38: 0.5714
+  Paziente 39: 0.5000
+  Paziente 40: 0.7976
+  Paziente 41: 0.5000
+  Paziente 42: 0.1079
+  Paziente 43: 0.5079
+  Paziente 44: 0.4071
+  Paziente 45: 0.5000
+  Paziente 46: 0.5000
+  Paziente 47: 0.5000
+  Paziente 48: 0.5000
+  Paziente 49: 0.2493
+  Paziente 50: 0.4026
+  Paziente 51: 0.5439
+  Paziente 52: 0.5506
+  Paziente 53: 0.4286
+  Paziente 54: 0.5000
+  Paziente 55: 0.5000
+  Paziente 56: 0.5000
+  Paziente 57: 0.4838
+  Paziente 58: 0.5000
+  Paziente 59: 0.6476
+  Paziente 60: 0.5000
+  Paziente 61: 0.8542
+  Paziente 62: 0.1302
+  Paziente 63: 0.7024
+  Paziente 64: 0.4222
+  Paziente 65: 0.5309
+  Paziente 66: 0.5000
+  Paziente 67: 0.5000
+  Paziente 68: 0.9048
+  Paziente 69: 0.2113
+  Paziente 70: 0.6232
+  Paziente 71: 0.0984
+  Paziente 72: 0.5000
+  Paziente 73: 0.5000
+  Paziente 74: 0.6878
+  Paziente 75: 0.0286
+  Paziente 76: 0.4286
+  Paziente 77: 0.5752
+  Paziente 78: 0.6595
+  Paziente 79: 0.8869
+  Paziente 80: 0.4821
+  Paziente 81: 0.9016
+  Paziente 82: 0.7460
+  Paziente 83: 0.7262
+  Paziente 84: 0.1556
+  Paziente 85: 0.6331
+  Paziente 86: 0.5000
+  Paziente 87: 0.5000
+  Paziente 88: 0.6082
+  Paziente 89: 0.5000
+  Paziente 90: 0.4511
+  Paziente 91: 0.2411
+  Paziente 92: 0.5873
+  Paziente 93: 0.9968
+  Paziente 94: 0.7492
+  Paziente 95: 0.5536
+  Paziente 96: 0.3810
+  Paziente 97: 0.5000
+  Paziente 98: 0.6548
+  Paziente 99: 0.2381

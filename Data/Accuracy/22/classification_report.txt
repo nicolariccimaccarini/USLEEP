@@ -1,0 +1,10 @@
+Classification Report - Paziente 22
+==================================================
+              precision    recall  f1-score   support
+
+           0       0.12      1.00      0.21        37
+           1       0.00      0.00      0.00       278
+
+    accuracy                           0.12       315
+   macro avg       0.06      0.50      0.11       315
+weighted avg       0.01      0.12      0.02       315

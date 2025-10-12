@@ -1,0 +1,10 @@
+Classification Report - Paziente 31
+==================================================
+              precision    recall  f1-score   support
+
+           0       0.45      0.27      0.34       142
+           1       0.67      0.82      0.74       257
+
+    accuracy                           0.62       399
+   macro avg       0.56      0.54      0.54       399
+weighted avg       0.59      0.62      0.59       399

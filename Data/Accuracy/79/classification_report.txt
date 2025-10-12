@@ -1,0 +1,10 @@
+Classification Report - Paziente 79
+==================================================
+              precision    recall  f1-score   support
+
+           0       0.80      0.76      0.78       332
+           1       0.24      0.28      0.26        88
+
+    accuracy                           0.66       420
+   macro avg       0.52      0.52      0.52       420
+weighted avg       0.68      0.66      0.67       420
