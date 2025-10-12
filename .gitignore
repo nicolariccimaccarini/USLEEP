@@ -4,5 +4,5 @@ env/
 winvenv/
 
 # Ignora la cartella Data
-Data/Output
+Data/Output/*/model
 # Edf_temp/
