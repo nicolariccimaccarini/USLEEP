@@ -9,4 +9,5 @@ Data/Output
 
 
 src/download_from_hpc.sh
+src/upload_to_hpc.sh
 src/prova1.ipynb
