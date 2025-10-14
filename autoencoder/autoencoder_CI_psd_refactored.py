@@ -31,7 +31,7 @@ if gpus:
 CONFIG = {
     'window_size': 0.5,  # Finestra sliding window (0.5s)
     'overlap_ratio': 0.2,  # 20% di sovrapposizione (0.1s overlap su 0.5s window)
-    'batch_size': 16,
+    'batch_size': 256,
     'epochs': 200,
     'patience': 20,
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
