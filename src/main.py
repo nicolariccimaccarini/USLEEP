@@ -103,8 +103,7 @@ class MLPipelineRunner:
                 env=env,
                 cwd=working_dir,
                 capture_output=True,
-                text=True,
-                timeout=7200  # Timeout di 2 ore per script lunghi
+                text=True
             )
             
             os.chdir(original_cwd)
@@ -125,10 +124,6 @@ class MLPipelineRunner:
                 print(f"❌ {script_name} fallito (codice: {result.returncode})")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            os.chdir(original_cwd)
-            print(f"⏱️ {script_name} interrotto per timeout")
-            return False
         except Exception as e:
             os.chdir(original_cwd)
             print(f"❌ Errore durante l'esecuzione: {str(e)}")

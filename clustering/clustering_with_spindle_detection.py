@@ -26,7 +26,7 @@ tf.keras.config.enable_unsafe_deserialization()
 # Configurazione
 CONFIG = {
     'window_size': 0.5,  # Finestra sliding window (0.5s)
-    'overlap_ratio': 0.8,  # 80% sovrapposizione
+    'overlap_ratio': 0.2,  # 20% sovrapposizione (0.1s overlap)
     'num_clusters': 3,
     'spindle_threshold': 0.6,  # Soglia per considerare una finestra come spindle
     'min_spindle_duration': 0.5,  # Durata minima spindle in secondi
