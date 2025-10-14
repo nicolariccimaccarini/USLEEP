@@ -29,8 +29,8 @@ if gpus:
 
 # Parametri di configurazione
 CONFIG = {
-    'window_size': 0.5,  # Finestra più piccola per sliding window (0.5s)
-    'overlap_ratio': 0.8,  # 80% di sovrapposizione per analisi fine
+    'window_size': 0.5,  # Finestra sliding window (0.5s)
+    'overlap_ratio': 0.2,  # 20% di sovrapposizione (0.1s overlap su 0.5s window)
     'batch_size': 16,
     'epochs': 200,
     'patience': 20,

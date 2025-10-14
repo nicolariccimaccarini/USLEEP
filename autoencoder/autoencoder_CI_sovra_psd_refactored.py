@@ -8,12 +8,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 from autoencoder_CI_psd_refactored import process_edf_files, CONFIG
 
 # Modifica la configurazione per sovrapposizione maggiore
-CONFIG['overlap_ratio'] = 0.9  # 90% di sovrapposizione
-CONFIG['window_size'] = 0.5    # Finestra ancora più piccola
+CONFIG['overlap_ratio'] = 0.6  # 60% di sovrapposizione invece di 90%
+CONFIG['window_size'] = 0.5    # Mantieni 0.5s
 
 def main():
     """Wrapper per eseguire con parametri di sovrapposizione elevata"""
     print("🔄 Esecuzione autoencoder con alta sovrapposizione...")
+    
     print(f"📐 Finestra: {CONFIG['window_size']}s, Overlap: {CONFIG['overlap_ratio']*100}%")
     
     # Modifica i percorsi di output per distinguere questa versione
