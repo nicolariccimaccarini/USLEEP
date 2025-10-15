@@ -28,7 +28,7 @@ CONFIG = {
     'window_size': 0.5,  # Finestra sliding window (0.5s)
     'overlap_ratio': 0.2,  # 20% sovrapposizione (0.1s overlap)
     'num_clusters': 3,
-    'spindle_threshold': 0.6,  # Soglia per considerare una finestra come spindle
+    'spindle_threshold': 0.1,  # Soglia per considerare una finestra come spindle
     'min_spindle_duration': 0.5,  # Durata minima spindle in secondi
     'max_spindle_duration': 3.0,  # Durata massima spindle in secondi
     'smoothing_window': 5,
