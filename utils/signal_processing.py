@@ -73,52 +73,63 @@ def normalize_spectrum(spectrum):
         normalized_spectrum.append(normalized_channel)
     return np.array(normalized_spectrum)
 
-def apply_smoothing(scores, window_size=5, method='moving_average'):
+def apply_smoothing(signal, window_size, method='moving_average'):
     """
-    Applica smoothing ai punteggi
+    Applica smoothing al segnale
     
     Args:
-        scores: array di punteggi
-        window_size: dimensione della finestra per lo smoothing
-        method: 'moving_average' o 'gaussian'
+        signal: segnale da smussare
+        window_size: dimensione finestra (in campioni)
+        method: 'moving_average', 'gaussian', 'savgol'
     
     Returns:
-        array di punteggi smussati
+        segnale smussato
     """
+    if len(signal) == 0:
+        return signal
+        
     if method == 'moving_average':
-        smoothed = np.convolve(scores, np.ones(window_size)/window_size, mode='same')
-    elif method == 'gaussian':
-        from scipy import ndimage
-        smoothed = ndimage.gaussian_filter1d(scores, sigma=window_size/3)
-    else:
-        smoothed = scores
+        from scipy.ndimage import uniform_filter1d
+        return uniform_filter1d(signal.astype(float), size=window_size, mode='nearest')
     
-    return smoothed
+    elif method == 'gaussian':
+        from scipy.ndimage import gaussian_filter1d
+        sigma = window_size / 4  # Sigma = window_size/4 per approssimazione
+        return gaussian_filter1d(signal.astype(float), sigma=sigma, mode='nearest')
+    
+    elif method == 'savgol':
+        from scipy.signal import savgol_filter
+        if window_size >= len(signal):
+            window_size = len(signal) // 2 * 2 - 1  # Deve essere dispari e < len
+        if window_size < 3:
+            window_size = 3
+        polyorder = min(2, window_size - 1)
+        return savgol_filter(signal, window_size, polyorder)
+    
+    else:
+        return signal
 
-def detect_spindle_regions(scores, threshold=0.5, min_duration_samples=10):
+def detect_spindle_regions(signal, threshold, min_duration_samples):
     """
-    Rileva regioni contigue sopra la soglia che rappresentano spindles
+    Rileva regioni continue sopra la soglia
     
     Args:
-        scores: array di punteggi per ogni finestra
-        threshold: soglia per considerare una finestra come spindle
-        min_duration_samples: durata minima in campioni per considerare una regione valida
+        signal: segnale binario o continuo
+        threshold: soglia per rilevamento
+        min_duration_samples: durata minima in campioni
     
     Returns:
-        list di tuple (start_idx, end_idx) per ogni spindle rilevato
+        lista di tuple (start_idx, end_idx)
     """
-    above_threshold = scores > threshold
-    regions = []
+    binary_signal = signal >= threshold
     
-    if not np.any(above_threshold):
-        return regions
-    
-    # Trova inizio e fine delle regioni contigue
-    diff = np.diff(np.concatenate(([False], above_threshold, [False])).astype(int))
+    # Trova transizioni
+    diff = np.diff(np.concatenate(([False], binary_signal, [False])).astype(int))
     starts = np.where(diff == 1)[0]
     ends = np.where(diff == -1)[0]
     
     # Filtra per durata minima
+    regions = []
     for start, end in zip(starts, ends):
         if end - start >= min_duration_samples:
             regions.append((start, end))
@@ -127,23 +138,24 @@ def detect_spindle_regions(scores, threshold=0.5, min_duration_samples=10):
 
 def convert_regions_to_time(regions, segment_length, overlap_ratio, sfreq):
     """
-    Converte gli indici delle regioni in tempi di inizio e fine
+    Converte regioni da indici di segmenti a tempi in secondi
     
     Args:
-        regions: list di tuple (start_idx, end_idx)
-        segment_length: lunghezza del segmento in campioni
-        overlap_ratio: percentuale di sovrapposizione
+        regions: lista di tuple (start_idx, end_idx) in indici di segmenti
+        segment_length: lunghezza segmento in campioni
+        overlap_ratio: rapporto di sovrapposizione
         sfreq: frequenza di campionamento
     
     Returns:
-        list di tuple (start_time, end_time) in secondi
+        lista di tuple (start_time, end_time) in secondi
     """
-    step = int(segment_length * (1 - overlap_ratio))
-    time_regions = []
+    step_samples = int(segment_length * (1 - overlap_ratio))
+    step_time = step_samples / sfreq
     
+    time_regions = []
     for start_idx, end_idx in regions:
-        start_time = start_idx * step / sfreq
-        end_time = (end_idx * step + segment_length) / sfreq
+        start_time = start_idx * step_time
+        end_time = end_idx * step_time
         time_regions.append((start_time, end_time))
     
     return time_regions
