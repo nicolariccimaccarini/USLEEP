@@ -123,6 +123,7 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         DataFrame con i risultati dei spindles rilevati
     """
     print(f"🔍 Analisi spindles per canale: {channel_name}")
+    print(f"📊 Frequenza di campionamento: {sfreq} Hz")
     
     # Prepara segmenti con overlap ottimizzato
     segment_length = int(CONFIG['window_size'] * sfreq)
