@@ -262,9 +262,11 @@ def main():
     print_comparison_results(results)
     analyze_time_differences(results)
     
-    # Crea grafico
-    output_dir = os.path.join(base_path, "Data/Output/evaluation")
+    # Crea cartella di output per i risultati di accuratezza
+    output_dir = os.path.join(base_path, "Data/Accuracy")
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Crea grafico
     plot_path = os.path.join(output_dir, "spindle_comparison.png")
     create_comparison_plot(results, plot_path)
     
@@ -287,6 +289,8 @@ def main():
     results_df.to_csv(results_csv_path, index=False)
     
     print(f"\n💾 Risultati dettagliati salvati in: {results_csv_path}")
+    print(f"📊 Grafico salvato in: {plot_path}")
+    print(f"📁 Tutti i file di output sono in: {output_dir}")
     print("✅ Analisi completata!")
 
 if __name__ == "__main__":
