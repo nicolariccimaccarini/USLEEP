@@ -87,6 +87,13 @@ def apply_smoothing(signal, window_size, method='moving_average'):
     """
     if len(signal) == 0:
         return signal
+    
+    # Assicurati che window_size sia valido
+    window_size = max(1, int(window_size))
+    window_size = min(window_size, len(signal))
+    
+    if window_size <= 1:
+        return signal
         
     if method == 'moving_average':
         from scipy.ndimage import uniform_filter1d
@@ -94,16 +101,27 @@ def apply_smoothing(signal, window_size, method='moving_average'):
     
     elif method == 'gaussian':
         from scipy.ndimage import gaussian_filter1d
-        sigma = window_size / 4  # Sigma = window_size/4 per approssimazione
+        sigma = max(0.5, window_size / 4)  # Evita sigma troppo piccolo
         return gaussian_filter1d(signal.astype(float), sigma=sigma, mode='nearest')
     
     elif method == 'savgol':
         from scipy.signal import savgol_filter
+        # Savgol richiede finestra dispari e almeno 3 campioni
+        if window_size % 2 == 0:
+            window_size += 1
+        window_size = max(3, window_size)
+        window_size = min(window_size, len(signal))
+        
+        # Se la finestra è ancora troppo grande, usa il massimo possibile
         if window_size >= len(signal):
-            window_size = len(signal) // 2 * 2 - 1  # Deve essere dispari e < len
-        if window_size < 3:
-            window_size = 3
+            window_size = len(signal) - 1 if len(signal) > 1 else 1
+            if window_size % 2 == 0:
+                window_size -= 1
+        
         polyorder = min(2, window_size - 1)
+        if polyorder < 1:
+            polyorder = 1
+            
         return savgol_filter(signal, window_size, polyorder)
     
     else:

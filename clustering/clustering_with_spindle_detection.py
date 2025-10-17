@@ -33,7 +33,6 @@ CONFIG = {
     'min_spindle_duration': 0.5,        # Durata minima spindle (standard letteratura)
     'max_spindle_duration': 2.0,        # Durata massima (più conservativo)
     'smoothing_window_sec': 0.25,       # 0.25s smoothing window
-    'sigma_band': (11, 16),             # Banda sigma per spindles (Hz)
     'context_window_sec': 30,           # Finestra per normalizzazione locale
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
@@ -79,35 +78,6 @@ def compute_anomaly_scores(encoder, segments, threshold_percentile=90):
     scores = (distances - distances.min()) / (distances.max() - distances.min())
     
     return scores, cluster_labels
-
-def compute_sigma_power(segments, sfreq, sigma_band=(11, 16)):
-    """
-    Calcola la potenza nella banda sigma per ogni segmento
-    
-    Args:
-        segments: segmenti EEG
-        sfreq: frequenza di campionamento
-        sigma_band: tuple (freq_min, freq_max) per banda sigma
-    
-    Returns:
-        array di potenze sigma normalizzate
-    """
-    from scipy.signal import welch
-    
-    sigma_powers = []
-    
-    for segment in segments:
-        # Calcola PSD usando Welch
-        freqs, psd = welch(segment, fs=sfreq, nperseg=len(segment)//2)
-        
-        # Trova indici per banda sigma
-        sigma_mask = (freqs >= sigma_band[0]) & (freqs <= sigma_band[1])
-        
-        # Calcola potenza media nella banda sigma
-        sigma_power = np.mean(psd[sigma_mask])
-        sigma_powers.append(sigma_power)
-    
-    return np.array(sigma_powers)
 
 def compute_z_score_threshold(signal, context_window_samples, threshold_z=2.3):
     """
@@ -159,101 +129,111 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     segments = segment_signal_with_overlap(data, segment_length, CONFIG['overlap_ratio'])
     
     if len(segments) == 0:
+        print(f"⚠️ Nessun segmento generato per {channel_name}")
         return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)'])
     
-    # Metodo 1: Calcola potenza sigma diretta (più affidabile per spindles)
-    sigma_powers = compute_sigma_power(segments, sfreq, CONFIG['sigma_band'])
+    print(f"📏 Segmenti generati: {len(segments)}")
     
-    # Metodo 2: Usa anche features dell'autoencoder (per confronto)
-    from signal_processing import compute_spectrum_numpy, normalize_spectrum
-    
-    spectrums, _ = compute_spectrum_numpy(segments, sfreq)
-    normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
-    
-    channel_spectra = np.array([spec[0] for spec in normalized_spectrums])
-    encoder_input = channel_spectra.reshape(-1, 1, channel_spectra.shape[1])
-    
-    # Ottieni features encoder
-    features = encoder.predict(encoder_input, verbose=0)
-    features_flat = features.reshape(features.shape[0], -1)
-    
-    # Combina potenza sigma e features encoder
-    # Usa correlazione pesata: sigma power (70%) + encoder features (30%)
-    encoder_anomaly = np.linalg.norm(features_flat, axis=1)
-    encoder_anomaly = (encoder_anomaly - encoder_anomaly.min()) / (encoder_anomaly.max() - encoder_anomaly.min())
-    
-    combined_signal = 0.7 * sigma_powers + 0.3 * encoder_anomaly
-    
-    # Normalizzazione locale con z-score
-    context_window_samples = int(CONFIG['context_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
-    
-    if CONFIG['spindle_threshold_type'] == 'z_score':
-        z_scores, threshold_binary = compute_z_score_threshold(
-            combined_signal, 
-            context_window_samples, 
-            CONFIG['spindle_threshold']
+    try:
+        # Usa features dell'autoencoder per il rilevamento
+        from signal_processing import compute_spectrum_numpy, normalize_spectrum
+        
+        spectrums, _ = compute_spectrum_numpy(segments, sfreq)
+        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
+        
+        channel_spectra = np.array([spec[0] for spec in normalized_spectrums])
+        encoder_input = channel_spectra.reshape(-1, 1, channel_spectra.shape[1])
+        
+        # Ottieni features encoder
+        features = encoder.predict(encoder_input, verbose=0)
+        features_flat = features.reshape(features.shape[0], -1)
+        
+        # Calcola anomaly score dalle features encoder
+        encoder_anomaly = np.linalg.norm(features_flat, axis=1)
+        encoder_anomaly = (encoder_anomaly - encoder_anomaly.min()) / (encoder_anomaly.max() - encoder_anomaly.min())
+        
+        # Usa direttamente le features dell'encoder come segnale di detection
+        combined_signal = encoder_anomaly
+        
+        # Normalizzazione locale con z-score
+        context_window_samples = int(CONFIG['context_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
+        context_window_samples = max(1, min(context_window_samples, len(combined_signal)))
+        
+        if CONFIG['spindle_threshold_type'] == 'z_score':
+            z_scores, threshold_binary = compute_z_score_threshold(
+                combined_signal, 
+                context_window_samples, 
+                CONFIG['spindle_threshold']
+            )
+            detection_signal = z_scores
+            binary_threshold = threshold_binary
+        else:
+            # Fallback a percentile
+            threshold_val = np.percentile(combined_signal, CONFIG['spindle_threshold'])
+            detection_signal = combined_signal
+            binary_threshold = combined_signal >= threshold_val
+        
+        # Smoothing temporale con controllo dimensioni
+        smoothing_window_samples = int(CONFIG['smoothing_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
+        smoothing_window_samples = max(1, min(smoothing_window_samples, len(binary_threshold)))
+        
+        print(f"🔧 Window size per smoothing: {smoothing_window_samples} (lunghezza segnale: {len(binary_threshold)})")
+        
+        smoothed_binary = apply_smoothing(
+            binary_threshold.astype(float), 
+            window_size=smoothing_window_samples, 
+            method='moving_average'
+        ) >= 0.5  # Riconverti a binario
+        
+        # Rileva regioni spindle con durate corrette
+        step_duration = CONFIG['window_size'] * (1 - CONFIG['overlap_ratio'])
+        min_duration_samples = int(CONFIG['min_spindle_duration'] / step_duration)
+        max_duration_samples = int(CONFIG['max_spindle_duration'] / step_duration)
+        
+        spindle_regions = detect_spindle_regions(
+            smoothed_binary.astype(float), 
+            threshold=0.5,  # Già binario
+            min_duration_samples=min_duration_samples
         )
-        detection_signal = z_scores
-        binary_threshold = threshold_binary
-    else:
-        # Fallback a percentile
-        threshold_val = np.percentile(combined_signal, CONFIG['spindle_threshold'])
-        detection_signal = combined_signal
-        binary_threshold = combined_signal >= threshold_val
-    
-    # Smoothing temporale
-    smoothing_window_samples = int(CONFIG['smoothing_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
-    smoothed_binary = apply_smoothing(
-        binary_threshold.astype(float), 
-        window_size=smoothing_window_samples, 
-        method='moving_average'
-    ) >= 0.5  # Riconverti a binario
-    
-    # Rileva regioni spindle con durate corrette
-    step_duration = CONFIG['window_size'] * (1 - CONFIG['overlap_ratio'])
-    min_duration_samples = int(CONFIG['min_spindle_duration'] / step_duration)
-    max_duration_samples = int(CONFIG['max_spindle_duration'] / step_duration)
-    
-    spindle_regions = detect_spindle_regions(
-        smoothed_binary.astype(float), 
-        threshold=0.5,  # Già binario
-        min_duration_samples=min_duration_samples
-    )
-    
-    # Filtra per durata massima
-    spindle_regions = [
-        (start, end) for start, end in spindle_regions 
-        if end - start <= max_duration_samples
-    ]
-    
-    # Converti in tempi reali
-    time_regions = convert_regions_to_time(
-        spindle_regions, 
-        segment_length, 
-        CONFIG['overlap_ratio'], 
-        sfreq
-    )
-    
-    # Crea DataFrame risultati
-    results = []
-    for start_time, end_time in time_regions:
-        # Verifica durata finale
-        duration = end_time - start_time
-        if CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']:
-            results.append({
-                'Canale': channel_name,
-                'Start_Time(s)': round(start_time, 3),
-                'End_Time(s)': round(end_time, 3)
-            })
-    
-    print(f"✅ Rilevati {len(results)} spindles per {channel_name}")
-    
-    # Debug info
-    print(f"   📊 Sigma power - Media: {np.mean(sigma_powers):.3f}, Std: {np.std(sigma_powers):.3f}")
-    print(f"   📊 Z-scores - Max: {np.max(detection_signal):.2f}, Soglia: {CONFIG['spindle_threshold']}")
-    print(f"   📊 Regioni candidate: {len(spindle_regions)}")
-    
-    return pd.DataFrame(results)
+        
+        # Filtra per durata massima
+        spindle_regions = [
+            (start, end) for start, end in spindle_regions 
+            if end - start <= max_duration_samples
+        ]
+        
+        # Converti in tempi reali
+        time_regions = convert_regions_to_time(
+            spindle_regions, 
+            segment_length, 
+            CONFIG['overlap_ratio'], 
+            sfreq
+        )
+        
+        # Crea DataFrame risultati
+        results = []
+        for start_time, end_time in time_regions:
+            # Verifica durata finale
+            duration = end_time - start_time
+            if CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']:
+                results.append({
+                    'Canale': channel_name,
+                    'Start_Time(s)': round(start_time, 3),
+                    'End_Time(s)': round(end_time, 3)
+                })
+        
+        print(f"✅ Rilevati {len(results)} spindles per {channel_name}")
+        
+        # Debug info
+        print(f"   📊 Encoder anomaly - Media: {np.mean(encoder_anomaly):.3f}, Std: {np.std(encoder_anomaly):.3f}")
+        print(f"   📊 Z-scores - Max: {np.max(detection_signal):.2f}, Soglia: {CONFIG['spindle_threshold']}")
+        print(f"   📊 Regioni candidate: {len(spindle_regions)}")
+        
+        return pd.DataFrame(results)
+        
+    except Exception as e:
+        print(f"❌ Errore durante il processing di {channel_name}: {e}")
+        return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)'])
 
 def main():
     """Funzione principale per clustering e rilevamento spindles"""
