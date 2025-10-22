@@ -1,6 +1,74 @@
 import numpy as np
 import os
 from sklearn.preprocessing import MinMaxScaler
+from scipy.signal import butter, filtfilt
+
+def apply_sigma_band_filter(data, sfreq, low_freq=9, high_freq=15):
+    """
+    Applica filtro passa-banda per isolare la banda sigma (9-15 Hz)
+    
+    Args:
+        data: segnale EEG (n_channels, n_samples)
+        sfreq: frequenza di campionamento
+        low_freq: frequenza minima banda sigma
+        high_freq: frequenza massima banda sigma
+    
+    Returns:
+        segnale filtrato nella banda sigma
+    """
+    # Progetta filtro Butterworth passa-banda
+    nyquist = sfreq / 2
+    low = low_freq / nyquist
+    high = high_freq / nyquist
+    
+    # Assicurati che le frequenze normalizzate siano valide
+    if low >= 1.0 or high >= 1.0:
+        raise ValueError(f"Frequenze troppo alte per sfreq={sfreq}. Sigma band: {low_freq}-{high_freq} Hz")
+    
+    b, a = butter(4, [low, high], btype='band')
+    
+    # Applica il filtro a ogni canale
+    filtered_data = np.zeros_like(data)
+    for ch in range(data.shape[0]):
+        filtered_data[ch] = filtfilt(b, a, data[ch])
+    
+    return filtered_data
+
+def compute_sigma_power_spectrum(segments, freq_sample):
+    """
+    Calcola la potenza spettrale focalizzata sulla banda sigma
+    
+    Args:
+        segments: lista di segmenti EEG
+        freq_sample: frequenza di campionamento
+    
+    Returns:
+        potenze sigma, frequenze sigma
+    """
+    sigma_powers = []
+    
+    # Definisci la banda sigma
+    sigma_low, sigma_high = 9, 15
+    
+    for segment in segments:
+        # FFT per ogni canale del segmento
+        segment_fft = np.fft.fft(segment, axis=1)
+        freqs = np.fft.fftfreq(segment.shape[1], d=1/freq_sample)
+        
+        # Trova gli indici della banda sigma
+        sigma_mask = (freqs >= sigma_low) & (freqs <= sigma_high)
+        
+        # Estrai solo le componenti nella banda sigma
+        sigma_fft = segment_fft[:, sigma_mask]
+        sigma_power = np.abs(sigma_fft) ** 2
+        
+        # Calcola potenza media nella banda sigma per ogni canale
+        sigma_power_mean = np.mean(sigma_power, axis=1, keepdims=True)
+        sigma_powers.append(sigma_power_mean)
+    
+    sigma_freqs = freqs[sigma_mask]
+    
+    return sigma_powers, sigma_freqs
 
 def get_file_output_path(base_data_path, filename=None):
     """Crea e restituisce il percorso per l'output specifico del file"""
@@ -22,15 +90,7 @@ def pad_last_segment(segment, window_size):
 
 def segment_signal_with_overlap(data, segment_length, overlap_ratio):
     """
-    Segmenta il segnale con sovrapposizione usando ratio di overlap
-    
-    Args:
-        data: array numpy (n_channels, n_samples)
-        segment_length: lunghezza del segmento in campioni
-        overlap_ratio: percentuale di sovrapposizione (0.0-1.0)
-    
-    Returns:
-        list di segmenti
+    Segmenta il segnale con sovrapposizione per risoluzione temporale di 0.1s
     """
     step = int(segment_length * (1 - overlap_ratio))
     segments = []
@@ -38,14 +98,6 @@ def segment_signal_with_overlap(data, segment_length, overlap_ratio):
     for start in range(0, data.shape[1] - segment_length + 1, step):
         segment = data[:, start:start + segment_length]
         segments.append(segment)
-    
-    # Gestisce l'ultimo segmento se necessario
-    if data.shape[1] % step != 0:
-        last_start = data.shape[1] - segment_length
-        if last_start > 0 and last_start not in range(0, data.shape[1] - segment_length + 1, step):
-            last_segment = data[:, last_start:]
-            last_segment = pad_last_segment(last_segment, segment_length)
-            segments.append(last_segment)
     
     return segments
 
@@ -68,7 +120,8 @@ def normalize_spectrum(spectrum):
     scaler = MinMaxScaler()
     normalized_spectrum = []
     for channel_spectrum in spectrum:
-        channel_spectrum = channel_spectrum.reshape(-1, 1)
+        if len(channel_spectrum.shape) == 1:
+            channel_spectrum = channel_spectrum.reshape(-1, 1)
         normalized_channel = scaler.fit_transform(channel_spectrum).flatten()
         normalized_spectrum.append(normalized_channel)
     return np.array(normalized_spectrum)

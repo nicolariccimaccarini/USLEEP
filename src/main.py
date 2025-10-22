@@ -133,12 +133,12 @@ class MLPipelineRunner:
     def get_pipeline_scripts(self):
         """Restituisce la lista degli script da eseguire in base alla modalità"""
         training_scripts = [
-            ("autoencoder/autoencoder_CI_psd_refactored.py", "Autoencoder PSD Refactored", True),
-            ("autoencoder/autoencoder_CI_sovra_psd_refactored.py", "Autoencoder PSD con Alta Sovrapposizione", False)
+            ("autoencoder/autoencoder_sigma_band.py", "Autoencoder Banda Sigma (Spindles)", True),
+            #("autoencoder/autoencoder_CI_sovra_psd_refactored.py", "Autoencoder PSD con Alta Sovrapposizione", False)
         ]
         
         detection_scripts = [
-            ("clustering/clustering_with_spindle_detection.py", "Clustering e Rilevamento Spindles", True)
+            ("clustering/clustering_sigma_bandpy", "Clustering e Rilevamento Spindles in Sigma Band", True)
         ]
         
         if self.pipeline_mode == 'training_only':
