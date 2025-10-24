@@ -4,7 +4,7 @@ env/
 winvenv/
 
 # Ignora la cartella Data
-# Data/Output
+Data/Output
 # Edf_temp/
 
 

@@ -43,50 +43,62 @@ def extract_spindle_features_from_sigma(encoder, segments):
     Returns:
         features estratte, labels del clustering
     """
-    # Ottieni features dall'encoder specializzato
+    # Ottieni features dall'encoder
     spindle_features = encoder.predict(segments, verbose=0)
     spindle_features_flat = spindle_features.reshape(spindle_features.shape[0], -1)
     
-    print(f"📊 Features spindle estratte: {spindle_features_flat.shape}")
+    print(f"📊 Features estratte: {spindle_features_flat.shape}")
     
-    # Clustering binario: spindle vs non-spindle
-    kmeans = KMeans(
-        n_clusters=SPINDLE_CONFIG['num_clusters'], 
-        random_state=42,
-        n_init=20,  # Più inizializzazioni per stabilità
-        max_iter=500
-    )
+    # 🔍 DEBUG: Analizza variabilità features
+    feature_std = np.std(spindle_features_flat, axis=0)
+    feature_mean = np.mean(spindle_features_flat, axis=0)
     
-    cluster_labels = kmeans.fit_predict(spindle_features_flat)
+    print(f"🔍 DEBUG Features:")
+    print(f"   Media features: {feature_mean}")
+    print(f"   Std features: {feature_std}")
+    print(f"   Range features: {np.ptp(spindle_features_flat, axis=0)}")
+    print(f"   Features costanti: {np.sum(feature_std < 1e-6)}/{len(feature_std)}")
     
-    # Calcola silhouette score per validare la qualità del clustering
-    if len(set(cluster_labels)) > 1:
-        sil_score = silhouette_score(spindle_features_flat, cluster_labels)
-        print(f"📈 Silhouette Score: {sil_score:.3f}")
+    # Rimuovi features costanti
+    valid_features_mask = feature_std > 1e-6
+    if np.sum(valid_features_mask) < 2:
+        print("❌ ERRORE: Troppo poche features variabili per clustering!")
+        return spindle_features_flat, np.zeros(len(spindle_features_flat)), None
     
-    # Determina quale cluster rappresenta gli spindles
-    # Gli spindles tendono ad avere features più concentrate/anomale
-    cluster_distances = []
-    for cluster_id in range(SPINDLE_CONFIG['num_clusters']):
-        cluster_mask = cluster_labels == cluster_id
-        if np.sum(cluster_mask) > 0:
-            cluster_center = kmeans.cluster_centers_[cluster_id]
-            cluster_points = spindle_features_flat[cluster_mask]
-            avg_distance = np.mean([
-                np.linalg.norm(point - cluster_center) 
-                for point in cluster_points
-            ])
-            cluster_distances.append(avg_distance)
-        else:
-            cluster_distances.append(float('inf'))
+    valid_features = spindle_features_flat[:, valid_features_mask]
+    print(f"✅ Features valide per clustering: {valid_features.shape[1]}/{spindle_features_flat.shape[1]}")
     
-    # Il cluster con distanza minore (più compatto) è probabilmente quello degli spindles
-    spindle_cluster_id = np.argmin(cluster_distances)
+    # Prova clustering con diverse strategie
+    try:
+        # Strategia 1: K-means standard
+        kmeans = KMeans(n_clusters=2, random_state=42, n_init=20, max_iter=500)
+        cluster_labels = kmeans.fit_predict(valid_features)
+        
+        unique_clusters = len(np.unique(cluster_labels))
+        print(f"🎯 Cluster trovati: {unique_clusters}")
+        
+        if unique_clusters < 2:
+            print("⚠️ K-means fallito, provo clustering basato su percentile...")
+            # Strategia fallback: usa varianza delle features
+            feature_variance = np.var(valid_features, axis=1)
+            threshold = np.percentile(feature_variance, 75)  # Top 25% come spindles
+            cluster_labels = (feature_variance > threshold).astype(int)
+            
+        print(f"📊 Distribuzione finale: {np.bincount(cluster_labels)}")
+        
+    except Exception as e:
+        print(f"❌ Errore clustering: {e}")
+        return spindle_features_flat, np.zeros(len(spindle_features_flat)), None
     
-    print(f"🎯 Cluster spindle identificato: {spindle_cluster_id}")
-    print(f"📊 Distribuzione cluster: {np.bincount(cluster_labels)}")
+    # Identifica cluster spindles (quello meno numeroso se bilanciato)
+    cluster_counts = np.bincount(cluster_labels)
+    if len(cluster_counts) == 2 and min(cluster_counts) > 0:
+        # Scegli il cluster meno frequente come spindles
+        spindle_cluster_id = np.argmin(cluster_counts)
+    else:
+        spindle_cluster_id = 0
     
-    # Crea labels binari: 1 = spindle, 0 = non-spindle
+    print(f"🎯 Cluster spindle: {spindle_cluster_id}")
     spindle_binary_labels = (cluster_labels == spindle_cluster_id).astype(int)
     
     return spindle_features_flat, spindle_binary_labels, kmeans
@@ -130,73 +142,46 @@ def process_channel_for_spindle_detection(channel_name, data, sfreq, sigma_encod
         channel_powers = np.array([power[0] for power in normalized_powers])
         encoder_input = channel_powers.reshape(-1, 1, channel_powers.shape[1])
         
-        # Estrai features e classifica usando SOLO ML
+        # Estrai features e classifica
         features, spindle_labels, kmeans_model = extract_spindle_features_from_sigma(
             sigma_encoder, encoder_input
         )
         
-        # Calcola confidence score basato sulla distanza dal centroide
-        confidence_scores = []
-        for i, label in enumerate(spindle_labels):
-            if label == 1:  # Solo per i segmenti classificati come spindles
-                centroid = kmeans_model.cluster_centers_[np.argmin([
-                    np.linalg.norm(kmeans_model.cluster_centers_[j] - features[i]) 
-                    for j in range(len(kmeans_model.cluster_centers_))
-                ])]
-                distance = np.linalg.norm(features[i] - centroid)
-                # Converti distanza in confidence (più vicino = più confidence)
-                max_distance = np.max([
-                    np.linalg.norm(kmeans_model.cluster_centers_[j] - centroid) 
-                    for j in range(len(kmeans_model.cluster_centers_))
-                ])
-                confidence = 1.0 - (distance / max_distance) if max_distance > 0 else 1.0
-                confidence_scores.append(max(0.5, confidence))  # Min confidence 0.5
-            else:
-                confidence_scores.append(0.0)
+        if kmeans_model is None:
+            print(f"❌ Clustering fallito per {channel_name}")
+            return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
         
-        # Rileva regioni continue di spindles
+        # 🔧 DEBUG: Verifica labels
+        spindle_count = np.sum(spindle_labels)
+        print(f"🔍 DEBUG: {spindle_count} segmenti classificati come spindles su {len(spindle_labels)}")
+        
+        if spindle_count == 0:
+            print(f"⚠️ Nessun segmento spindle trovato per {channel_name}")
+            return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
+        
+        # Rileva regioni continue
         step_duration = SPINDLE_CONFIG['window_size'] * (1 - SPINDLE_CONFIG['overlap_ratio'])
-        
         spindle_regions = []
-        start_idx = None
         
-        for i, is_spindle in enumerate(spindle_labels):
-            if is_spindle == 1 and start_idx is None:
-                start_idx = i
-            elif is_spindle == 0 and start_idx is not None:
-                # Fine regione spindle
-                duration = (i - start_idx) * step_duration
-                if (SPINDLE_CONFIG['min_spindle_duration'] <= duration <= 
-                    SPINDLE_CONFIG['max_spindle_duration']):
-                    
-                    start_time = start_idx * step_duration
-                    end_time = i * step_duration
-                    avg_confidence = np.mean(confidence_scores[start_idx:i])
-                    
-                    spindle_regions.append({
-                        'Canale': channel_name,
-                        'Start_Time(s)': round(start_time, 3),
-                        'End_Time(s)': round(end_time, 3),
-                        'Confidence': round(avg_confidence, 3)
-                    })
-                
-                start_idx = None
+        # Trova transizioni
+        spindle_diff = np.diff(np.concatenate(([0], spindle_labels, [0])))
+        starts = np.where(spindle_diff == 1)[0]
+        ends = np.where(spindle_diff == -1)[0]
         
-        # Gestisci ultimo segmento se necessario
-        if start_idx is not None:
-            duration = (len(spindle_labels) - start_idx) * step_duration
+        for start_idx, end_idx in zip(starts, ends):
+            duration = (end_idx - start_idx) * step_duration
+            
             if (SPINDLE_CONFIG['min_spindle_duration'] <= duration <= 
                 SPINDLE_CONFIG['max_spindle_duration']):
                 
                 start_time = start_idx * step_duration
-                end_time = len(spindle_labels) * step_duration
-                avg_confidence = np.mean(confidence_scores[start_idx:])
+                end_time = end_idx * step_duration
                 
                 spindle_regions.append({
                     'Canale': channel_name,
                     'Start_Time(s)': round(start_time, 3),
                     'End_Time(s)': round(end_time, 3),
-                    'Confidence': round(avg_confidence, 3)
+                    'Confidence': 0.8  # Placeholder
                 })
         
         print(f"✅ Rilevati {len(spindle_regions)} spindles per {channel_name}")

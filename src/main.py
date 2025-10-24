@@ -138,7 +138,7 @@ class MLPipelineRunner:
         ]
         
         detection_scripts = [
-            ("clustering/clustering_sigma_bandpy", "Clustering e Rilevamento Spindles in Sigma Band", True)
+            ("clustering/clustering_sigma_band.py", "Clustering e Rilevamento Spindles in Sigma Band", True)
         ]
         
         if self.pipeline_mode == 'training_only':

@@ -36,7 +36,7 @@ def apply_sigma_band_filter(data, sfreq, low_freq=9, high_freq=15):
 
 def compute_sigma_power_spectrum(segments, freq_sample):
     """
-    Calcola la potenza spettrale focalizzata sulla banda sigma
+    Calcola la potenza spettrale focalizzata sulla banda sigma con features piu' discriminative
     
     Args:
         segments: lista di segmenti EEG
@@ -46,8 +46,6 @@ def compute_sigma_power_spectrum(segments, freq_sample):
         potenze sigma, frequenze sigma
     """
     sigma_powers = []
-    
-    # Definisci la banda sigma
     sigma_low, sigma_high = 9, 15
     
     for segment in segments:
@@ -55,20 +53,27 @@ def compute_sigma_power_spectrum(segments, freq_sample):
         segment_fft = np.fft.fft(segment, axis=1)
         freqs = np.fft.fftfreq(segment.shape[1], d=1/freq_sample)
         
-        # Trova gli indici della banda sigma
+        # Banda sigma
         sigma_mask = (freqs >= sigma_low) & (freqs <= sigma_high)
-        
-        # Estrai solo le componenti nella banda sigma
         sigma_fft = segment_fft[:, sigma_mask]
         sigma_power = np.abs(sigma_fft) ** 2
         
-        # Calcola potenza media nella banda sigma per ogni canale
-        sigma_power_mean = np.mean(sigma_power, axis=1, keepdims=True)
-        sigma_powers.append(sigma_power_mean)
+        # 🔧 MIGLIORE: Estrai multiple features discriminative
+        for ch in range(segment.shape[0]):
+            channel_sigma_power = sigma_power[ch, :]
+            
+            # Features multiple per discriminare meglio
+            features = [
+                np.mean(channel_sigma_power),           # Potenza media
+                np.std(channel_sigma_power),            # Variabilità
+                np.max(channel_sigma_power),            # Picco massimo
+                np.sum(channel_sigma_power > np.percentile(channel_sigma_power, 90)),  # Conteggio picchi alti
+                np.trapz(channel_sigma_power),          # Area sotto curva
+            ]
+            
+            sigma_powers.append(np.array(features))
     
-    sigma_freqs = freqs[sigma_mask]
-    
-    return sigma_powers, sigma_freqs
+    return sigma_powers, freqs[sigma_mask]
 
 def get_file_output_path(base_data_path, filename=None):
     """Crea e restituisce il percorso per l'output specifico del file"""
@@ -116,15 +121,44 @@ def compute_spectrum_numpy(segments, freq_sample):
     return spectrums, frequencies
 
 def normalize_spectrum(spectrum):
-    """Normalizza lo spettro usando MinMaxScaler"""
+    """
+    Normalizza le features usando MinMaxScaler
+    """
+    if isinstance(spectrum, (list, tuple)) and len(spectrum) > 0:
+        # Se è una lista di array (come nel nostro caso)
+        if isinstance(spectrum[0], np.ndarray):
+            # Converte in array 2D: (n_samples, n_features)
+            features_array = np.array(spectrum)
+            if features_array.ndim == 1:
+                features_array = features_array.reshape(-1, 1)
+        else:
+            # Se è già un array
+            features_array = np.array(spectrum)
+            if features_array.ndim == 1:
+                features_array = features_array.reshape(-1, 1)
+    else:
+        # Gestione caso singolo spectrum (backward compatibility)
+        if isinstance(spectrum, np.ndarray):
+            if spectrum.ndim == 1:
+                features_array = spectrum.reshape(-1, 1)
+            else:
+                features_array = spectrum
+        else:
+            # Vecchia logica per compatibilità
+            scaler = MinMaxScaler()
+            normalized_spectrum = []
+            for channel_spectrum in spectrum:
+                if len(channel_spectrum.shape) == 1:
+                    channel_spectrum = channel_spectrum.reshape(-1, 1)
+                normalized_channel = scaler.fit_transform(channel_spectrum).flatten()
+                normalized_spectrum.append(normalized_channel)
+            return np.array(normalized_spectrum)
+    
+    # Normalizza le features
     scaler = MinMaxScaler()
-    normalized_spectrum = []
-    for channel_spectrum in spectrum:
-        if len(channel_spectrum.shape) == 1:
-            channel_spectrum = channel_spectrum.reshape(-1, 1)
-        normalized_channel = scaler.fit_transform(channel_spectrum).flatten()
-        normalized_spectrum.append(normalized_channel)
-    return np.array(normalized_spectrum)
+    normalized_features = scaler.fit_transform(features_array)
+    
+    return normalized_features
 
 def apply_smoothing(signal, window_size, method='moving_average'):
     """
