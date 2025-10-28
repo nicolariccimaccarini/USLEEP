@@ -68,7 +68,7 @@ def compute_sigma_power_spectrum(segments, freq_sample):
                 np.std(channel_sigma_power),            # Variabilità
                 np.max(channel_sigma_power),            # Picco massimo
                 np.sum(channel_sigma_power > np.percentile(channel_sigma_power, 90)),  # Conteggio picchi alti
-                np.trapz(channel_sigma_power),          # Area sotto curva
+                np.trapezoid(channel_sigma_power),          # Area sotto curva
             ]
             
             sigma_powers.append(np.array(features))

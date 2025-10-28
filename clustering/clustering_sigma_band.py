@@ -105,42 +105,41 @@ def extract_spindle_features_from_sigma(encoder, segments):
 
 def process_channel_for_spindle_detection(channel_name, data, sfreq, sigma_encoder):
     """
-    Processa un canale per rilevare spindles usando solo features ML
-    
-    Returns:
-        DataFrame con i risultati degli spindles rilevati
+    Detection con stesse features usate nel training
     """
     print(f"🔍 Rilevamento spindles per canale: {channel_name}")
     
-    # Applica filtro banda sigma
+    # Applica stesso preprocessing del training
     sigma_filtered_data = apply_sigma_band_filter(
-        data, sfreq, 
-        SPINDLE_CONFIG['sigma_low'], 
-        SPINDLE_CONFIG['sigma_high']
+        data, sfreq, SPINDLE_CONFIG['sigma_low'], SPINDLE_CONFIG['sigma_high']
     )
     
-    # Segmentazione con alta risoluzione
     segment_length = int(SPINDLE_CONFIG['window_size'] * sfreq)
     segments = segment_signal_with_overlap(
-        sigma_filtered_data, 
-        segment_length, 
-        SPINDLE_CONFIG['overlap_ratio']
+        sigma_filtered_data, segment_length, SPINDLE_CONFIG['overlap_ratio']
     )
     
     if len(segments) == 0:
-        print(f"⚠️ Nessun segmento per {channel_name}")
         return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
     
-    print(f"📏 Segmenti: {len(segments)}")
-    
     try:
-        # Calcola potenza sigma
+        # Stesse features del training
         sigma_powers, _ = compute_sigma_power_spectrum(segments, sfreq)
-        normalized_powers = [normalize_spectrum(power) for power in sigma_powers]
         
-        # Prepara input per l'encoder
-        channel_powers = np.array([power[0] for power in normalized_powers])
-        encoder_input = channel_powers.reshape(-1, 1, channel_powers.shape[1])
+        # Prepara features per questo canale (indice 0 perché è un singolo canale)
+        channel_features = []
+        for power_group in sigma_powers:
+            if len(power_group) > 0:
+                channel_features.append(power_group[0])  # 5 features discriminative
+        
+        if not channel_features:
+            print(f"⚠️ Nessuna feature estratta per {channel_name}")
+            return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
+        
+        # Formato input encoder: (n_segments, 1, 5_features)
+        encoder_input = np.array(channel_features).reshape(-1, 1, 5)
+        
+        print(f"📊 Input encoder shape: {encoder_input.shape}")
         
         # Estrai features e classifica
         features, spindle_labels, kmeans_model = extract_spindle_features_from_sigma(
@@ -195,6 +194,7 @@ def process_channel_for_spindle_detection(channel_name, data, sfreq, sigma_encod
         
     except Exception as e:
         print(f"❌ Errore processando {channel_name}: {e}")
+        print(f"🔍 Debug: segments shape: {len(segments) if segments else 'None'}")
         return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
 
 def main():

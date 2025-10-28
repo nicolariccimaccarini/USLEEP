@@ -41,29 +41,23 @@ CONFIG = {
 
 def create_sigma_autoencoder(n_sigma_features):
     """
-    Crea autoencoder specializzato per features della banda sigma
+    Autoencoder profondo ottimizzato per features sigma discriminative
     """
     input_layer = Input(shape=(1, n_sigma_features), name='sigma_input')
     
-    # Encoder più profondo per catturare patterns sigma
-    encoded = LSTM(256, activation='tanh', return_sequences=True, name='encoder_lstm_1')(input_layer)
-    encoded = Dropout(0.3, name='encoder_dropout_1')(encoded)
-    encoded = LSTM(128, activation='tanh', return_sequences=True, name='encoder_lstm_2')(encoded)
-    encoded = Dropout(0.3, name='encoder_dropout_2')(encoded)
-    encoded = LSTM(64, activation='tanh', return_sequences=False, name='encoder_lstm_3')(encoded)
+    # Encoder LSTM profondo 
+    encoded = LSTM(128, activation='relu', return_sequences=True, name='encoder_lstm_1')(input_layer)
+    encoded = LSTM(64, activation='relu', return_sequences=True, name='encoder_lstm_2')(encoded)
+    encoded = Dropout(0.2, name='encoder_dropout')(encoded)
+    encoded = LSTM(32, activation='relu', return_sequences=False, name='encoder_lstm_3')(encoded)
+    encoded = Dense(32, activation='relu', name='encoder_dense')(encoded)  # Layer chiave per clustering
     
-    # Bottleneck per feature compatte degli spindles
-    encoded = Dense(32, activation='tanh', name='sigma_bottleneck')(encoded)
-    encoded = Dense(16, activation='tanh', name='spindle_features')(encoded)  # Features finali spindle
-    
-    # Decoder
+    # Decoder simmetrico
     decoded = RepeatVector(1, name='repeat_vector')(encoded)
-    decoded = LSTM(64, activation='tanh', return_sequences=True, name='decoder_lstm_1')(decoded)
-    decoded = Dropout(0.3, name='decoder_dropout_1')(decoded)
-    decoded = LSTM(128, activation='tanh', return_sequences=True, name='decoder_lstm_2')(decoded)
-    decoded = Dropout(0.3, name='decoder_dropout_2')(decoded)
-    decoded = LSTM(256, activation='tanh', return_sequences=True, name='decoder_lstm_3')(decoded)
-    decoded = TimeDistributed(Dense(n_sigma_features, activation='linear'), name='sigma_output')(decoded)
+    decoded = LSTM(32, activation='relu', return_sequences=True, name='decoder_lstm_1')(decoded)
+    decoded = LSTM(64, activation='relu', return_sequences=True, name='decoder_lstm_2')(decoded)
+    decoded = LSTM(128, activation='relu', return_sequences=True, name='decoder_lstm_3')(decoded)
+    decoded = TimeDistributed(Dense(n_sigma_features), name='sigma_output')(decoded)
     
     autoencoder = Model(inputs=input_layer, outputs=decoded, name='sigma_autoencoder')
     autoencoder.compile(optimizer='adam', loss=MeanSquaredError(), metrics=['mae'])
@@ -71,7 +65,7 @@ def create_sigma_autoencoder(n_sigma_features):
     return autoencoder
 
 def process_edf_for_spindles():
-    """Processa i file EEG focalizzandosi sulla banda sigma per spindle detection"""
+    """Processa EEG con features consistenti per training e detection"""
     
     # Configurazione percorsi
     path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
@@ -96,7 +90,7 @@ def process_edf_for_spindles():
     # Aggregazione dati sigma per canale
     aggregated_sigma_data = {}
     
-    print("🧠 Processamento EEG per banda sigma (9-15 Hz)...")
+    print("🧠 Processamento EEG con features discriminative...")
     for file in filenames:
         if not file.endswith('.edf'):
             continue
@@ -104,59 +98,68 @@ def process_edf_for_spindles():
         file_path = os.path.join(path_edf, file)
         print(f"📁 Processando: {file}")
         
-        # Carica file EEG
+        # Carica e filtra EEG
         raw = mne.io.read_raw_edf(file_path, preload=True)
         sfreq = raw.info['sfreq']
         
-        print(f"📊 Frequenza campionamento: {sfreq} Hz")
-        
-        # Filtra canali EEG
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
         
-        # Applica filtro banda sigma (9-15 Hz) - STEP FONDAMENTALE
-        print("🔧 Applicando filtro banda sigma (9-15 Hz)...")
+        # Filtro banda sigma + segmentazione
+        print("🔧 Applicando filtro banda sigma...")
         sigma_filtered_data = apply_sigma_band_filter(
-            raw.get_data(), 
-            sfreq, 
-            CONFIG['sigma_low'], 
-            CONFIG['sigma_high']
+            raw.get_data(), sfreq, CONFIG['sigma_low'], CONFIG['sigma_high']
         )
         
-        # Segmentazione con alta risoluzione temporale (0.1s step)
         segment_length = int(CONFIG['window_size'] * sfreq)
         segments = segment_signal_with_overlap(
-            sigma_filtered_data, 
-            segment_length, 
-            CONFIG['overlap_ratio']
+            sigma_filtered_data, segment_length, CONFIG['overlap_ratio']
         )
         
-        print(f"📏 Segmenti generati: {len(segments)} (risoluzione: {CONFIG['window_size'] * (1-CONFIG['overlap_ratio'])}s)")
+        # 🎯 CRUCIALE: Usa stesse features per training e detection
+        sigma_powers, _ = compute_sigma_power_spectrum(segments, sfreq)
         
-        # Calcola potenza nella banda sigma
-        sigma_powers, sigma_freqs = compute_sigma_power_spectrum(segments, sfreq)
-        normalized_sigma_powers = [normalize_spectrum(power) for power in sigma_powers]
-        
-        # Aggregazione per canale
+        # Aggregazione per canale con features consistenti
         for idx, channel in enumerate(raw.ch_names):
             if channel not in aggregated_sigma_data:
                 aggregated_sigma_data[channel] = []
-            for norm_power in normalized_sigma_powers:
-                aggregated_sigma_data[channel].append(norm_power[idx])
+            
+            # Estrai features per ogni segmento di questo canale
+            for segment_idx in range(len(segments)):
+                # sigma_powers[segment_idx] contiene già le 5 features per tutti i canali
+                # Prendi solo quelle del canale corrente
+                segment_powers = []
+                for power_group in sigma_powers:
+                    if len(power_group) > idx:
+                        segment_powers.append(power_group[idx])
+                
+                if segment_powers:
+                    aggregated_sigma_data[channel].extend(segment_powers)
     
-    # Training degli autoencoder specializzati per banda sigma
+    # Training con features discriminative
     strategy = tf.distribute.MirroredStrategy()
     
-    print(f"\n🤖 Training autoencoder sigma-specifici per {len(aggregated_sigma_data)} canali...")
+    print(f"\n🤖 Training autoencoder con features discriminative...")
     for channel_idx, (channel, data) in enumerate(aggregated_sigma_data.items(), 1):
         print(f"\n🧠 Canale {channel} ({channel_idx}/{len(aggregated_sigma_data)})")
         
-        # Preparazione dati sigma
+        # Preparazione dati: ogni sample ha 5 features discriminative
         data = np.array(data)
-        n_sigma_features = data.shape[1]
+        print(f"📊 Shape dati grezzi: {data.shape}")
+        
+        # Assicurati che abbiamo 5 features per segmento
+        if data.ndim == 1:
+            # Se è 1D, reshape in (n_samples, 5)
+            n_samples = len(data) // 5
+            data = data.reshape(n_samples, 5)
+        elif data.ndim == 2 and data.shape[1] != 5:
+            print(f"⚠️ Dimensioni features inaspettate: {data.shape}")
+            continue
+            
+        n_sigma_features = 5  # Sempre 5 features discriminative
         all_sigma_segments = data.reshape((-1, 1, n_sigma_features))
         
-        print(f"📊 Features sigma per segmento: {n_sigma_features}")
+        print(f"📊 Features discriminative: 5 (media, std, max, picchi, area)")
         print(f"📊 Segmenti totali: {all_sigma_segments.shape[0]}")
         
         # Percorsi di salvataggio
