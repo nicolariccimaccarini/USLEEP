@@ -98,131 +98,120 @@ def process_edf_for_spindles():
         file_path = os.path.join(path_edf, file)
         print(f"📁 Processando: {file}")
         
-        # Carica e filtra EEG
+        # Carica EEG
         raw = mne.io.read_raw_edf(file_path, preload=True)
         sfreq = raw.info['sfreq']
         
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
         
-        # Filtro banda sigma + segmentazione
-        print("🔧 Applicando filtro banda sigma...")
-        sigma_filtered_data = apply_sigma_band_filter(
-            raw.get_data(), sfreq, CONFIG['sigma_low'], CONFIG['sigma_high']
-        )
+        strategy = tf.distribute.MirroredStrategy()
         
-        segment_length = int(CONFIG['window_size'] * sfreq)
-        segments = segment_signal_with_overlap(
-            sigma_filtered_data, segment_length, CONFIG['overlap_ratio']
-        )
-        
-        # 🎯 CRUCIALE: Usa stesse features per training e detection
-        sigma_powers, _ = compute_sigma_power_spectrum(segments, sfreq)
-        
-        # Aggregazione per canale con features consistenti
-        for idx, channel in enumerate(raw.ch_names):
-            if channel not in aggregated_sigma_data:
-                aggregated_sigma_data[channel] = []
+        for channel_idx, channel in enumerate(raw.ch_names):
+            print(f"\n🧠 Processando canale {channel} ({channel_idx+1}/{len(raw.ch_names)})")
             
-            # Estrai features per ogni segmento di questo canale
-            for segment_idx in range(len(segments)):
-                # sigma_powers[segment_idx] contiene già le 5 features per tutti i canali
-                # Prendi solo quelle del canale corrente
-                segment_powers = []
-                for power_group in sigma_powers:
-                    if len(power_group) > idx:
-                        segment_powers.append(power_group[idx])
+            # Estrai solo i dati di questo canale
+            channel_data = raw.get_data()[channel_idx:channel_idx+1, :]
+            
+            # Filtro banda sigma + segmentazione
+            print("🔧 Applicando filtro banda sigma...")
+            sigma_filtered_data = apply_sigma_band_filter(
+                channel_data, sfreq, CONFIG['sigma_low'], CONFIG['sigma_high']
+            )
+            
+            segment_length = int(CONFIG['window_size'] * sfreq)
+            segments = segment_signal_with_overlap(
+                sigma_filtered_data, segment_length, CONFIG['overlap_ratio']
+            )
+            
+            # Features per questo canale
+            sigma_powers, _ = compute_sigma_power_spectrum(segments, sfreq)
+            
+            if not sigma_powers:
+                print(f"⚠️ Nessuna feature per {channel}")
+                continue
                 
-                if segment_powers:
-                    aggregated_sigma_data[channel].extend(segment_powers)
-    
-    # Training con features discriminative
-    strategy = tf.distribute.MirroredStrategy()
-    
-    print(f"\n🤖 Training autoencoder con features discriminative...")
-    for channel_idx, (channel, data) in enumerate(aggregated_sigma_data.items(), 1):
-        print(f"\n🧠 Canale {channel} ({channel_idx}/{len(aggregated_sigma_data)})")
-        
-        # Preparazione dati: ogni sample ha 5 features discriminative
-        data = np.array(data)
-        print(f"📊 Shape dati grezzi: {data.shape}")
-        
-        # Assicurati che abbiamo 5 features per segmento
-        if data.ndim == 1:
-            # Se è 1D, reshape in (n_samples, 5)
+            # Prepara dati per training
+            channel_features = []
+            for power_group in sigma_powers:
+                if len(power_group) > 0:
+                    channel_features.extend(power_group[0])  # Solo primo canale (è uno solo)
+            
+            if not channel_features:
+                continue
+                
+            # Reshape per training
+            data = np.array(channel_features)
             n_samples = len(data) // 5
             data = data.reshape(n_samples, 5)
-        elif data.ndim == 2 and data.shape[1] != 5:
-            print(f"⚠️ Dimensioni features inaspettate: {data.shape}")
-            continue
+            all_sigma_segments = data.reshape((-1, 1, 5))
             
-        n_sigma_features = 5  # Sempre 5 features discriminative
-        all_sigma_segments = data.reshape((-1, 1, n_sigma_features))
+            print(f"📊 Segmenti per {channel}: {all_sigma_segments.shape[0]}")
+            
+            # Training per questo canale
+            model_path = os.path.join(weights_path, f"sigma_autoencoder_{channel}.h5")
+            plot_path = os.path.join(images_path, f"sigma_training_{channel}.png")
+            
+            try:
+                with strategy.scope():
+                    sigma_autoencoder = create_sigma_autoencoder(5)
+                
+                early_stopping = EarlyStopping(
+                    monitor='val_loss', 
+                    patience=CONFIG['patience'], 
+                    verbose=1, 
+                    restore_best_weights=True
+                )
+                
+                history = sigma_autoencoder.fit(
+                    all_sigma_segments, all_sigma_segments,
+                    epochs=CONFIG['epochs'],
+                    batch_size=CONFIG['batch_size'],
+                    validation_split=0.2,
+                    callbacks=[early_stopping],
+                    verbose=1
+                )
+                
+                # Salva modello
+                sigma_autoencoder.save(model_path)
+                
+                # Plot training
+                plt.figure(figsize=(12, 4))
+                plt.subplot(1, 2, 1)
+                plt.plot(history.history["loss"], 'r-', label="Train Loss")
+                plt.plot(history.history["val_loss"], 'b--', label="Val Loss")
+                plt.title(f"Training - {channel}")
+                plt.legend()
+                plt.grid(True)
+                
+                plt.subplot(1, 2, 2)
+                plt.plot(history.history["mae"], 'g-', label="Train MAE")
+                plt.plot(history.history["val_mae"], 'orange', linestyle='--', label="Val MAE")
+                plt.title(f"MAE - {channel}")
+                plt.legend()
+                plt.grid(True)
+                
+                plt.tight_layout()
+                plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+                plt.close()
+                
+                print(f"✅ Completato training per {channel}")
+                
+            except Exception as e:
+                print(f"❌ Errore training {channel}: {e}")
+            
+            finally:
+                # Pulizia memoria aggressiva
+                if 'sigma_autoencoder' in locals():
+                    del sigma_autoencoder
+                if 'history' in locals():
+                    del history
+                tf.keras.backend.clear_session()
+                gc.collect()
         
-        print(f"📊 Features discriminative: 5 (media, std, max, picchi, area)")
-        print(f"📊 Segmenti totali: {all_sigma_segments.shape[0]}")
-        
-        # Percorsi di salvataggio
-        model_path = os.path.join(weights_path, f"sigma_autoencoder_{channel}.h5")
-        plot_path = os.path.join(images_path, f"sigma_training_{channel}.png")
-        
-        # Creazione e addestramento modello sigma-specifico
-        with strategy.scope():
-            sigma_autoencoder = create_sigma_autoencoder(n_sigma_features)
-        
-        print(f"🏗️ Architettura autoencoder sigma per {channel}:")
-        sigma_autoencoder.summary()
-        
-        early_stopping = EarlyStopping(
-            monitor='val_loss', 
-            patience=CONFIG['patience'], 
-            verbose=1, 
-            restore_best_weights=True
-        )
-        
-        history = sigma_autoencoder.fit(
-            all_sigma_segments, all_sigma_segments,
-            epochs=CONFIG['epochs'],
-            batch_size=CONFIG['batch_size'],
-            validation_split=0.2,
-            callbacks=[early_stopping],
-            verbose=1
-        )
-        
-        # Salvataggio modello
-        sigma_autoencoder.save(model_path)
-        
-        # Plot training history con focus su convergenza
-        plt.figure(figsize=(15, 6))
-        
-        plt.subplot(1, 2, 1)
-        plt.plot(history.history["loss"], 'r-', label="Train Loss")
-        plt.plot(history.history["val_loss"], 'b--', label="Validation Loss")
-        plt.title(f"Sigma Band Training - {channel}")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.grid(True)
-        
-        plt.subplot(1, 2, 2)
-        plt.plot(history.history["mae"], 'g-', label="Train MAE")
-        plt.plot(history.history["val_mae"], 'orange', linestyle='--', label="Validation MAE")
-        plt.title(f"Sigma Band MAE - {channel}")
-        plt.xlabel("Epoch")
-        plt.ylabel("MAE")
-        plt.legend()
-        plt.grid(True)
-        
-        plt.tight_layout()
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Pulizia memoria
-        del sigma_autoencoder
-        tf.keras.backend.clear_session()
+        # Pulizia finale
+        del raw
         gc.collect()
-        
-        print(f"✅ Completato training sigma per {channel}")
 
 if __name__ == "__main__":
     process_edf_for_spindles()
