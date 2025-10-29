@@ -4,8 +4,7 @@ import pandas as pd
 import os
 import numpy as np
 import tensorflow as tf
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
+from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from tensorflow.keras.models import Model, load_model
@@ -61,9 +60,7 @@ def extract_spindle_features_from_sigma(encoder, segments):
     
     # Clustering su features PCA
     try:
-        # 1. Gaussian Mixture Model (più robusto di K-means)
-        from sklearn.mixture import GaussianMixture
-        
+        # Gaussian Mixture Model
         gmm = GaussianMixture(n_components=2, random_state=42, covariance_type='full')
         cluster_labels = gmm.fit_predict(pca_features)
         
