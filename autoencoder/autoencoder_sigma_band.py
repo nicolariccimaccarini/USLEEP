@@ -31,9 +31,9 @@ if gpus:
 CONFIG = {
     'window_size': 0.5,      # Finestra di 0.5s (durata minima spindle)
     'overlap_ratio': 0.8,    # 80% overlap -> step 0.1s per risoluzione temporale
-    'batch_size': 512,
-    'epochs': 300,
-    'patience': 30,
+    'batch_size': 256,
+    'epochs': 200,
+    'patience': 20,
     'sigma_low': 9,          # Banda sigma: 9-15 Hz
     'sigma_high': 15,
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
