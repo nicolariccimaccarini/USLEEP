@@ -137,14 +137,14 @@ def process_channel_for_spindle_detection(channel_name, data, sfreq, sigma_encod
         channel_features = []
         for power_group in sigma_powers:
             if len(power_group) > 0:
-                channel_features.append(power_group[0])  # 5 features discriminative
+                channel_features.append(power_group[0])  # 7 features discriminative
         
         if not channel_features:
             print(f"⚠️ Nessuna feature estratta per {channel_name}")
             return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Confidence'])
         
         # Formato input encoder: (n_segments, 1, 5_features)
-        encoder_input = np.array(channel_features).reshape(-1, 1, 5)
+        encoder_input = np.array(channel_features).reshape(-1, 1, 7)
         
         print(f"📊 Input encoder shape: {encoder_input.shape}")
         

@@ -163,7 +163,7 @@ def process_edf_for_spindles():
             
             try:
                 with strategy.scope():
-                    sigma_autoencoder = create_sigma_autoencoder(5)
+                    sigma_autoencoder = create_sigma_autoencoder(7)
                 
                 early_stopping = EarlyStopping(
                     monitor='val_loss', 
