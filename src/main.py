@@ -31,18 +31,16 @@ class MLPipelineRunner:
         output_folder = self.get_output_folder_name(edf_file)
         output_folder_path = os.path.join(self.output_path, output_folder)
         
-        # Controlla se esistono i modelli addestrati
-        model_paths = [
-            os.path.join(output_folder_path, "model", "canali_individuali"),
-            os.path.join(output_folder_path, "model", "canali_individuali_sovrapposti")
-        ]
+        # Controlla specificamente i modelli sigma_band
+        sigma_model_path = os.path.join(output_folder_path, "model", "sigma_band")
         
-        for model_path in model_paths:
-            if os.path.exists(model_path):
-                model_files = [f for f in os.listdir(model_path) if f.endswith('.h5')]
-                if len(model_files) > 0:
-                    return True
+        if os.path.exists(sigma_model_path):
+            model_files = [f for f in os.listdir(sigma_model_path) if f.endswith('.h5') and 'sigma_autoencoder' in f]
+            if len(model_files) > 0:
+                print(f"✅ Trovati {len(model_files)} modelli sigma per {edf_file}")
+                return True
         
+        print(f"❌ Nessun modello sigma trovato per {edf_file} in {sigma_model_path}")
         return False
 
 
