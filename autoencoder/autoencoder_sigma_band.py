@@ -87,9 +87,6 @@ def process_edf_for_spindles():
     os.makedirs(weights_path, exist_ok=True)
     os.makedirs(images_path, exist_ok=True)
     
-    # Aggregazione dati sigma per canale
-    aggregated_sigma_data = {}
-    
     print("🧠 Processamento EEG con features discriminative...")
     for file in filenames:
         if not file.endswith('.edf'):
@@ -130,25 +127,27 @@ def process_edf_for_spindles():
             if not sigma_powers:
                 print(f"⚠️ Nessuna feature per {channel}")
                 continue
-                
-            # Prepara dati per training
+            
+            print(f"🔍 DEBUG: Tipo sigma_powers: {type(sigma_powers)}")
+            print(f"🔍 DEBUG: Lunghezza sigma_powers: {len(sigma_powers)}")
+            if len(sigma_powers) > 0:
+                print(f"🔍 DEBUG: Tipo primo elemento: {type(sigma_powers[0])}")
+                print(f"🔍 DEBUG: Shape primo elemento: {sigma_powers[0].shape if hasattr(sigma_powers[0], 'shape') else 'N/A'}")
+            
             channel_features = []
-            for power_group in sigma_powers:
-                if len(power_group) > 0:
-                    channel_features.extend(power_group[0])  # Solo primo canale (è uno solo)
+            for power_features in sigma_powers:
+                channel_features.append(power_features)
             
             if not channel_features:
+                print(f"⚠️ Nessuna feature estratta per {channel}")
                 continue
                 
-            # Reshape per training
-            data = np.array(channel_features)
-            n_samples = len(data) // 5
-            data = data.reshape(n_samples, 5)
-            all_sigma_segments = data.reshape((-1, 1, 5))
+            # Reshape per training: (n_segments, 1, 5_features)
+            all_sigma_segments = np.array(channel_features).reshape(-1, 1, 5)
             
             print(f"📊 Segmenti per {channel}: {all_sigma_segments.shape[0]}")
             
-            # Training per questo canale
+            # Training
             model_path = os.path.join(weights_path, f"sigma_autoencoder_{channel}.h5")
             plot_path = os.path.join(images_path, f"sigma_training_{channel}.png")
             
@@ -199,6 +198,8 @@ def process_edf_for_spindles():
                 
             except Exception as e:
                 print(f"❌ Errore training {channel}: {e}")
+                import traceback
+                traceback.print_exc()
             
             finally:
                 # Pulizia memoria aggressiva
