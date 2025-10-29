@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from sklearn.preprocessing import MinMaxScaler
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, find_peaks
 
 def apply_sigma_band_filter(data, sfreq, low_freq=9, high_freq=15):
     """
@@ -58,17 +58,36 @@ def compute_sigma_power_spectrum(segments, freq_sample):
         sigma_fft = segment_fft[:, sigma_mask]
         sigma_power = np.abs(sigma_fft) ** 2
         
-        # 🔧 MIGLIORE: Estrai multiple features discriminative
         for ch in range(segment.shape[0]):
             channel_sigma_power = sigma_power[ch, :]
             
-            # Features multiple per discriminare meglio
+            mean_power = np.mean(channel_sigma_power)
+            std_power = np.std(channel_sigma_power)
+            max_power = np.max(channel_sigma_power)
+            
+            # Features 
+            power_ratio = max_power / (mean_power + 1e-10)  # Rapporto picco/media
+            spectral_centroid = np.sum(freqs[sigma_mask] * channel_sigma_power) / (np.sum(channel_sigma_power) + 1e-10)
+            spectral_bandwidth = np.sqrt(np.sum(((freqs[sigma_mask] - spectral_centroid) ** 2) * channel_sigma_power) / (np.sum(channel_sigma_power) + 1e-10))
+            
+            # Peak detection 
+            peaks, _ = find_peaks(channel_sigma_power, height=np.percentile(channel_sigma_power, 75))
+            peak_count = len(peaks)
+            
+            # Energia relativa nella banda centrale sigma (11-13 Hz)
+            central_mask = (freqs >= 11) & (freqs <= 13)
+            central_energy = np.sum(np.abs(segment_fft[ch, central_mask]) ** 2)
+            total_energy = np.sum(channel_sigma_power)
+            central_ratio = central_energy / (total_energy + 1e-10)
+            
             features = [
-                np.mean(channel_sigma_power),           # Potenza media
-                np.std(channel_sigma_power),            # Variabilità
-                np.max(channel_sigma_power),            # Picco massimo
-                np.sum(channel_sigma_power > np.percentile(channel_sigma_power, 90)),  # Conteggio picchi alti
-                np.trapezoid(channel_sigma_power),          # Area sotto curva
+                np.log1p(mean_power),        # Log per stabilizzare
+                np.log1p(std_power),         # Log per stabilizzare  
+                np.log1p(power_ratio),       # Rapporto discriminativo
+                spectral_centroid,           # Frequenza centrale
+                spectral_bandwidth,          # Larghezza spettrale
+                peak_count,                  # Numero di picchi
+                central_ratio                # Energia banda centrale
             ]
             
             sigma_powers.append(np.array(features))

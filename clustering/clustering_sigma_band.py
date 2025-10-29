@@ -6,6 +6,8 @@ import numpy as np
 import tensorflow as tf
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from tensorflow.keras.models import Model, load_model
 import sys
 import gc
@@ -34,14 +36,7 @@ SPINDLE_CONFIG = {
 
 def extract_spindle_features_from_sigma(encoder, segments):
     """
-    Estrae features specifiche per spindles dalla banda sigma usando l'encoder
-    
-    Args:
-        encoder: modello encoder addestrato sulla banda sigma
-        segments: segmenti preprocessati nella banda sigma
-    
-    Returns:
-        features estratte, labels del clustering
+    Clustering più robusto per features encoder
     """
     # Ottieni features dall'encoder
     spindle_features = encoder.predict(segments, verbose=0)
@@ -49,59 +44,74 @@ def extract_spindle_features_from_sigma(encoder, segments):
     
     print(f"📊 Features estratte: {spindle_features_flat.shape}")
     
-    # 🔍 DEBUG: Analizza variabilità features
-    feature_std = np.std(spindle_features_flat, axis=0)
-    feature_mean = np.mean(spindle_features_flat, axis=0)
+    # Normalizzazione delle features
+    scaler = StandardScaler()
+    normalized_features = scaler.fit_transform(spindle_features_flat)
     
-    print(f"🔍 DEBUG Features:")
-    print(f"   Media features: {feature_mean}")
-    print(f"   Std features: {feature_std}")
-    print(f"   Range features: {np.ptp(spindle_features_flat, axis=0)}")
-    print(f"   Features costanti: {np.sum(feature_std < 1e-6)}/{len(feature_std)}")
+    # Analisi variabilità
+    feature_std = np.std(normalized_features, axis=0)
+    print(f"🔍 Features std dopo normalizzazione: min={np.min(feature_std):.6f}, max={np.max(feature_std):.6f}")
+
+    # PCA per catturare varianza principale
+    pca = PCA(n_components=min(8, normalized_features.shape[1]))
+    pca_features = pca.fit_transform(normalized_features)
     
-    # Rimuovi features costanti
-    valid_features_mask = feature_std > 1e-6
-    if np.sum(valid_features_mask) < 2:
-        print("❌ ERRORE: Troppo poche features variabili per clustering!")
-        return spindle_features_flat, np.zeros(len(spindle_features_flat)), None
+    print(f"📊 Varianza spiegata PCA: {pca.explained_variance_ratio_[:3]}")
+    print(f"📊 Varianza totale: {np.sum(pca.explained_variance_ratio_):.3f}")
     
-    valid_features = spindle_features_flat[:, valid_features_mask]
-    print(f"✅ Features valide per clustering: {valid_features.shape[1]}/{spindle_features_flat.shape[1]}")
-    
-    # Prova clustering con diverse strategie
+    # Clustering su features PCA
     try:
-        # Strategia 1: K-means standard
-        kmeans = KMeans(n_clusters=2, random_state=42, n_init=20, max_iter=500)
-        cluster_labels = kmeans.fit_predict(valid_features)
+        # 1. Gaussian Mixture Model (più robusto di K-means)
+        from sklearn.mixture import GaussianMixture
         
-        unique_clusters = len(np.unique(cluster_labels))
-        print(f"🎯 Cluster trovati: {unique_clusters}")
+        gmm = GaussianMixture(n_components=2, random_state=42, covariance_type='full')
+        cluster_labels = gmm.fit_predict(pca_features)
         
-        if unique_clusters < 2:
-            print("⚠️ K-means fallito, provo clustering basato su percentile...")
-            # Strategia fallback: usa varianza delle features
-            feature_variance = np.var(valid_features, axis=1)
-            threshold = np.percentile(feature_variance, 75)  # Top 25% come spindles
-            cluster_labels = (feature_variance > threshold).astype(int)
+        print(f"🎯 GMM cluster trovati: {len(np.unique(cluster_labels))}")
+        print(f"📊 Distribuzione GMM: {np.bincount(cluster_labels)}")
+        
+        # Se GMM non funziona, prova DBSCAN
+        if len(np.unique(cluster_labels)) < 2:
+            from sklearn.cluster import DBSCAN
+            
+            # DBSCAN automatico
+            dbscan = DBSCAN(eps=0.3, min_samples=10)
+            cluster_labels = dbscan.fit_predict(pca_features)
+            
+            # Converti noise (-1) in cluster separato
+            cluster_labels[cluster_labels == -1] = np.max(cluster_labels) + 1
+            
+            print(f"🎯 DBSCAN cluster trovati: {len(np.unique(cluster_labels))}")
+            print(f"📊 Distribuzione DBSCAN: {np.bincount(cluster_labels)}")
+        
+        # Se ancora non funziona, usa threshold adattivo
+        if len(np.unique(cluster_labels)) < 2:
+            print("⚠️ Clustering fallito, uso threshold adattivo...")
+            
+            # Usa distanza dal centroide delle features PCA
+            centroid = np.mean(pca_features, axis=0)
+            distances = np.linalg.norm(pca_features - centroid, axis=1)
+            
+            # Threshold dinamico basato su percentile
+            threshold = np.percentile(distances, 85)  # Top 15% come spindles
+            cluster_labels = (distances > threshold).astype(int)
             
         print(f"📊 Distribuzione finale: {np.bincount(cluster_labels)}")
+        
+        # Identifica cluster spindles (quello meno numeroso)
+        cluster_counts = np.bincount(cluster_labels)
+        if len(cluster_counts) >= 2 and min(cluster_counts) > 0:
+            spindle_cluster_id = np.argmin(cluster_counts) if min(cluster_counts) < len(cluster_labels) * 0.3 else 1
+        else:
+            spindle_cluster_id = 0
+        
+        spindle_binary_labels = (cluster_labels == spindle_cluster_id).astype(int)
+        
+        return spindle_features_flat, spindle_binary_labels, (gmm if 'gmm' in locals() else None)
         
     except Exception as e:
         print(f"❌ Errore clustering: {e}")
         return spindle_features_flat, np.zeros(len(spindle_features_flat)), None
-    
-    # Identifica cluster spindles (quello meno numeroso se bilanciato)
-    cluster_counts = np.bincount(cluster_labels)
-    if len(cluster_counts) == 2 and min(cluster_counts) > 0:
-        # Scegli il cluster meno frequente come spindles
-        spindle_cluster_id = np.argmin(cluster_counts)
-    else:
-        spindle_cluster_id = 0
-    
-    print(f"🎯 Cluster spindle: {spindle_cluster_id}")
-    spindle_binary_labels = (cluster_labels == spindle_cluster_id).astype(int)
-    
-    return spindle_features_flat, spindle_binary_labels, kmeans
 
 def process_channel_for_spindle_detection(channel_name, data, sfreq, sigma_encoder):
     """

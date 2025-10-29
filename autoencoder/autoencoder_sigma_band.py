@@ -41,26 +41,36 @@ CONFIG = {
 
 def create_sigma_autoencoder(n_sigma_features):
     """
-    Autoencoder profondo ottimizzato per features sigma discriminative
+    Autoencoder con regolarizzazione per features più discriminative
     """
     input_layer = Input(shape=(1, n_sigma_features), name='sigma_input')
     
-    # Encoder LSTM profondo 
-    encoded = LSTM(128, activation='relu', return_sequences=True, name='encoder_lstm_1')(input_layer)
-    encoded = LSTM(64, activation='relu', return_sequences=True, name='encoder_lstm_2')(encoded)
-    encoded = Dropout(0.2, name='encoder_dropout')(encoded)
-    encoded = LSTM(32, activation='relu', return_sequences=False, name='encoder_lstm_3')(encoded)
-    encoded = Dense(32, activation='relu', name='encoder_dense')(encoded)  # Layer chiave per clustering
+    # Encoder con regolarizzazione per variabilità
+    encoded = LSTM(64, activation='tanh', return_sequences=True, 
+                   kernel_regularizer=tf.keras.regularizers.l2(0.001),
+                   name='encoder_lstm_1')(input_layer)
+    encoded = Dropout(0.3, name='encoder_dropout_1')(encoded)
     
-    # Decoder simmetrico
+    encoded = LSTM(32, activation='tanh', return_sequences=False,
+                   kernel_regularizer=tf.keras.regularizers.l2(0.001), 
+                   name='encoder_lstm_2')(encoded)
+    encoded = Dropout(0.2, name='encoder_dropout_2')(encoded)
+    
+    # Bottleneck 
+    encoded = Dense(16, activation='tanh', 
+                   kernel_regularizer=tf.keras.regularizers.l2(0.001),
+                   name='encoder_dense')(encoded)
+    
+    # Decoder
     decoded = RepeatVector(1, name='repeat_vector')(encoded)
-    decoded = LSTM(32, activation='relu', return_sequences=True, name='decoder_lstm_1')(decoded)
-    decoded = LSTM(64, activation='relu', return_sequences=True, name='decoder_lstm_2')(decoded)
-    decoded = LSTM(128, activation='relu', return_sequences=True, name='decoder_lstm_3')(decoded)
-    decoded = TimeDistributed(Dense(n_sigma_features), name='sigma_output')(decoded)
+    decoded = LSTM(32, activation='tanh', return_sequences=True, name='decoder_lstm_1')(decoded)
+    decoded = LSTM(64, activation='tanh', return_sequences=True, name='decoder_lstm_2')(decoded)
+    decoded = TimeDistributed(Dense(n_sigma_features, activation='linear'), name='sigma_output')(decoded)
     
     autoencoder = Model(inputs=input_layer, outputs=decoded, name='sigma_autoencoder')
-    autoencoder.compile(optimizer='adam', loss=MeanSquaredError(), metrics=['mae'])
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
+    autoencoder.compile(optimizer=optimizer, loss=MeanSquaredError(), metrics=['mae'])
     
     return autoencoder
 
@@ -143,7 +153,7 @@ def process_edf_for_spindles():
                 continue
                 
             # Reshape per training: (n_segments, 1, 5_features)
-            all_sigma_segments = np.array(channel_features).reshape(-1, 1, 5)
+            all_sigma_segments = np.array(channel_features).reshape(-1, 1, 7)
             
             print(f"📊 Segmenti per {channel}: {all_sigma_segments.shape[0]}")
             
@@ -159,7 +169,13 @@ def process_edf_for_spindles():
                     monitor='val_loss', 
                     patience=CONFIG['patience'], 
                     verbose=1, 
-                    restore_best_weights=True
+                    restore_best_weights=True,
+                    min_delta=0.0001  # Soglia minima per miglioramento
+                )
+
+                # Training più lungo con learning rate scheduling
+                lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+                    monitor='val_loss', factor=0.5, patience=10, min_lr=1e-6
                 )
                 
                 history = sigma_autoencoder.fit(
@@ -167,7 +183,7 @@ def process_edf_for_spindles():
                     epochs=CONFIG['epochs'],
                     batch_size=CONFIG['batch_size'],
                     validation_split=0.2,
-                    callbacks=[early_stopping],
+                    callbacks=[early_stopping, lr_scheduler],
                     verbose=1
                 )
                 
