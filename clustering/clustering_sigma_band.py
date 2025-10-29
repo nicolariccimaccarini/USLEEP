@@ -255,7 +255,7 @@ def main():
                 # Crea encoder sigma
                 sigma_encoder = Model(
                     inputs=sigma_autoencoder.input, 
-                    outputs=sigma_autoencoder.get_layer('spindle_features').output
+                    outputs=sigma_autoencoder.get_layer('encoder_dense').output
                 )
                 
                 # Estrai dati del canale
