@@ -139,7 +139,7 @@ def check_overlap(segments, segment_length, overlap, sfreq):
 
 segment_split_all = []
 overlap = 0.10  #percentuale di sovrapposzione
-window_size = 15 # Lunghezza della finestra in secondi
+window_size = 5 # Lunghezza della finestra in secondi
 num_clusters = 3
 
 # Path relativo alla cartella 'edf'

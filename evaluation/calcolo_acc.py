@@ -13,9 +13,9 @@ def parse_image_title(img_file):
         segment = int(match.group(2))
         channel = match.group(3).replace(' ', '')  # Rimuove gli spazi extra nel nome del canale (ad esempio "EEG Pz" -> "EEGPz")
         
-        # setto start e end manualmente visto che ogni segmento dura 15 secondi
-        start = (segment - 1) * 15.0
-        end = segment * 15.0
+        # setto start e end manualmente visto che ogni segmento dura 5 secondi
+        start = (segment - 1) * 5.0
+        end = segment * 5.0
         return cluster, channel, start, end
     return None
 
