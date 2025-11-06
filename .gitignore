@@ -4,10 +4,13 @@ env/
 winvenv/
 
 # Ignora la cartella Data
-# Data/Output
+Data/Output
 # Edf_temp/
 
 
 src/download_from_hpc.sh
 src/upload_to_hpc.sh
 src/prova1.ipynb
+utils/bandpass_filtering.py
+utils/__pycache__
+autoencoder/__pycache__

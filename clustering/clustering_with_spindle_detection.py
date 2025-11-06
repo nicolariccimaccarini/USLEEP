@@ -17,7 +17,8 @@ import gc
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
-    apply_smoothing, detect_spindle_regions, convert_regions_to_time
+    apply_smoothing, detect_spindle_regions, convert_regions_to_time,
+    butter_bandpass_filter, extract_spindle_band_power
 )
 
 # Abilita deserializzazione
@@ -25,16 +26,19 @@ tf.keras.config.enable_unsafe_deserialization()
 
 # Configurazione
 CONFIG = {
-    'window_size': 0.5,                 # Finestra di 0.5s per risoluzione freq ~2Hz
-    'overlap_ratio': 0.5,               # 50% overlap -> step 0.25s per precisione temporale
+    'window_size': 0.5,
+    'overlap_ratio': 0.2,
     'num_clusters': 3,
-    'spindle_threshold_type': 'z_score', # Usa z-score normalizzato
-    'spindle_threshold': 2.3,           # z >= 2.3 (95-99° percentile)
-    'min_spindle_duration': 0.5,        # Durata minima spindle (standard letteratura)
-    'max_spindle_duration': 2.0,        # Durata massima (più conservativo)
-    'smoothing_window_sec': 0.25,       # 0.25s smoothing window
-    'context_window_sec': 30,           # Finestra per normalizzazione locale
-    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
+    'spindle_threshold_type': 'z_score',
+    'spindle_threshold': 2.3,
+    'min_spindle_duration': 0.5,
+    'max_spindle_duration': 3.0,
+    'smoothing_window_sec': 0.25,
+    'context_window_sec': 30,
+    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'},
+    'spindle_lowcut': 9, 
+    'spindle_highcut': 15,
+    'filter_order': 4     
 }
 
 def load_autoencoder_with_fallback(model_path):
@@ -125,9 +129,23 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     print(f"🔍 Analisi spindles per canale: {channel_name}")
     print(f"📊 Frequenza di campionamento: {sfreq} Hz")
     
+    # Applica bandpass filter
+    print(f"Applicando bandpass filter {CONFIG['spindle_lowcut']}-{CONFIG['spindle_highcut']} Hz...")
+    filtered_data = butter_bandpass_filter(
+        data.reshape(1, -1),  # Assicura forma (1, n_samples)
+        CONFIG['spindle_lowcut'], 
+        CONFIG['spindle_highcut'], 
+        sfreq, 
+        order=CONFIG['filter_order']
+    ).flatten()
+    
     # Prepara segmenti con overlap ottimizzato
     segment_length = int(CONFIG['window_size'] * sfreq)
-    segments = segment_signal_with_overlap(data, segment_length, CONFIG['overlap_ratio'])
+    segments = segment_signal_with_overlap(
+        filtered_data.reshape(1, -1),
+        segment_length, 
+        CONFIG['overlap_ratio']
+    )
     
     if len(segments) == 0:
         print(f"⚠️ Nessun segmento generato per {channel_name}")
@@ -136,11 +154,22 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     print(f"📏 Segmenti generati: {len(segments)}")
     
     try:
-        # Usa features dell'autoencoder per il rilevamento
         from signal_processing import compute_spectrum_numpy, normalize_spectrum
         
-        spectrums, _ = compute_spectrum_numpy(segments, sfreq)
-        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
+        spectrums, frequencies = compute_spectrum_numpy(segments, sfreq)
+        
+        spindle_spectrums = []
+        for spectrum in spectrums:
+            spindle_band = extract_spindle_band_power(
+                spectrum, 
+                frequencies, 
+                CONFIG['spindle_lowcut'], 
+                CONFIG['spindle_highcut']
+            )
+            spindle_spectrums.append(spindle_band)
+        
+        # Normalizza
+        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spindle_spectrums]
         
         channel_spectra = np.array([spec[0] for spec in normalized_spectrums])
         encoder_input = channel_spectra.reshape(-1, 1, channel_spectra.shape[1])

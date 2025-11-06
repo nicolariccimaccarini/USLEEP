@@ -1,6 +1,60 @@
+from sklearn.preprocessing import MinMaxScaler
+from scipy.signal import butter, sosfilt, sosfiltfilt, sosfreqz
 import numpy as np
 import os
-from sklearn.preprocessing import MinMaxScaler
+
+
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    """
+    Progetta un filtro bandpass Butterworth usando Second-Order Sections (SOS)
+    
+    Args:
+        lowcut: Frequenza di taglio bassa (Hz)
+        highcut: Frequenza di taglio alta (Hz)
+        fs: Frequenza di campionamento (Hz)
+        order: Ordine del filtro (default: 4)
+    
+    Returns:
+        sos: Second-order sections representation of the filter
+    """
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    sos = butter(order, [low, high], analog=False, btype='band', output='sos')
+    
+    return sos
+
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=4):
+    """
+    Applica un filtro bandpass Butterworth ai dati usando SOS
+    
+    Args:
+        data: Array numpy (può essere 1D o 2D)
+        lowcut: Frequenza di taglio bassa (Hz)
+        highcut: Frequenza di taglio alta (Hz)
+        fs: Frequenza di campionamento (Hz)
+        order: Ordine del filtro (default: 4)
+    
+    Returns:
+        Dati filtrati (stessa forma dell'input)
+    
+    Note:
+        - Usa sosfiltfilt per filtraggio zero-phase (forward-backward)
+    """
+    sos = butter_bandpass(lowcut, highcut, fs, order=order)
+    
+    # Se data è 2D, applica filtro lungo l'asse corretto
+    if data.ndim == 2:
+        # Filtra ogni canale separatamente
+        filtered = np.zeros_like(data)
+        for i in range(data.shape[0]):
+            filtered[i] = sosfiltfilt(sos, data[i])
+        return filtered
+    else:
+        # Filtraggio 1D
+        return sosfiltfilt(sos, data)
+
 
 def get_file_output_path(base_data_path, filename=None):
     """Crea e restituisce il percorso per l'output specifico del file"""
@@ -14,11 +68,13 @@ def get_file_output_path(base_data_path, filename=None):
     else:
         return base_data_path
 
+
 def pad_last_segment(segment, window_size):
     """Applica padding con zeri all'ultimo segmento se necessario"""
     if segment.shape[1] < window_size:
         return np.pad(segment, ((0, 0), (0, window_size - segment.shape[1])), mode='constant')
     return segment
+
 
 def segment_signal_with_overlap(data, segment_length, overlap_ratio):
     """
@@ -49,6 +105,7 @@ def segment_signal_with_overlap(data, segment_length, overlap_ratio):
     
     return segments
 
+
 def compute_spectrum_numpy(segments, freq_sample):
     """Calcola lo spettro di potenza per ogni segmento"""
     spectrums = []
@@ -63,6 +120,7 @@ def compute_spectrum_numpy(segments, freq_sample):
     
     return spectrums, frequencies
 
+
 def normalize_spectrum(spectrum):
     """Normalizza lo spettro usando MinMaxScaler"""
     scaler = MinMaxScaler()
@@ -72,6 +130,7 @@ def normalize_spectrum(spectrum):
         normalized_channel = scaler.fit_transform(channel_spectrum).flatten()
         normalized_spectrum.append(normalized_channel)
     return np.array(normalized_spectrum)
+
 
 def apply_smoothing(signal, window_size, method='moving_average'):
     """
@@ -127,6 +186,7 @@ def apply_smoothing(signal, window_size, method='moving_average'):
     else:
         return signal
 
+
 def detect_spindle_regions(signal, threshold, min_duration_samples):
     """
     Rileva regioni continue sopra la soglia
@@ -154,6 +214,7 @@ def detect_spindle_regions(signal, threshold, min_duration_samples):
     
     return regions
 
+
 def convert_regions_to_time(regions, segment_length, overlap_ratio, sfreq):
     """
     Converte regioni da indici di segmenti a tempi in secondi
@@ -177,3 +238,23 @@ def convert_regions_to_time(regions, segment_length, overlap_ratio, sfreq):
         time_regions.append((start_time, end_time))
     
     return time_regions
+
+
+def extract_spindle_band_power(spectrum, frequencies, lowcut=9, highcut=15):
+    """
+    Estrae la potenza nella banda degli spindles (9-15 Hz) dallo spettro
+    
+    Args:
+        spectrum: spettro di potenza (n_channels, n_frequencies)
+        frequencies: array delle frequenze corrispondenti
+        lowcut: frequenza minima banda spindle
+        highcut: frequenza massima banda spindle
+    
+    Returns:
+        potenza nella banda degli spindles
+    """
+    mask = (frequencies >= lowcut) & (frequencies <= highcut)
+    if spectrum.ndim == 1:
+        return spectrum[mask]
+    else:
+        return spectrum[:, mask]
