@@ -14,7 +14,8 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap, 
-    compute_spectrum_numpy, normalize_spectrum
+    compute_spectrum_numpy, normalize_spectrum,
+    butter_bandpass_filter, extract_spindle_band_power  
 )
 
 # Configurazione GPU
@@ -29,12 +30,15 @@ if gpus:
 
 # Parametri di configurazione
 CONFIG = {
-    'window_size': 0.5,  # Finestra sliding window (0.5s)
-    'overlap_ratio': 0.2,  # 20% di sovrapposizione (0.1s overlap su 0.5s window)
+    'window_size': 0.5,
+    'overlap_ratio': 0.2,
     'batch_size': 256,
     'epochs': 200,
     'patience': 20,
-    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
+    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'},
+    'spindle_lowcut': 9, 
+    'spindle_highcut': 15,
+    'filter_order': 4     
 }
 
 def create_autoencoder_model(n_frequencies):
@@ -101,17 +105,41 @@ def process_edf_files():
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
         
+        # Applica bandpass filter
+        raw_data = raw.get_data()
+        print(f"🔊 Applicando bandpass filter {CONFIG['spindle_lowcut']}-{CONFIG['spindle_highcut']} Hz...")
+        filtered_data = butter_bandpass_filter(
+            raw_data, 
+            CONFIG['spindle_lowcut'], 
+            CONFIG['spindle_highcut'], 
+            sfreq, 
+            order=CONFIG['filter_order']
+        )
+        
         # Segmentazione con sliding window
         segment_length = int(CONFIG['window_size'] * sfreq)
         segments = segment_signal_with_overlap(
-            raw.get_data(), 
+            filtered_data,  # USA DATI FILTRATI
             segment_length, 
             CONFIG['overlap_ratio']
         )
         
         # Calcolo spettri
-        spectrums, _ = compute_spectrum_numpy(segments, sfreq)
-        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
+        spectrums, frequencies = compute_spectrum_numpy(segments, sfreq)
+        
+        spindle_spectrums = []
+        for spectrum in spectrums:
+            spindle_band = extract_spindle_band_power(
+                spectrum, 
+                frequencies, 
+                CONFIG['spindle_lowcut'], 
+                CONFIG['spindle_highcut']
+            )
+            spindle_spectrums.append(spindle_band)
+        
+        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spindle_spectrums]
+        
+        print(f"📊 Forma spettro banda spindle: {normalized_spectrums[0].shape}")
         
         # Aggregazione per canale
         for idx, channel in enumerate(raw.ch_names):
