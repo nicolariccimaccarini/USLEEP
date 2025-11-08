@@ -18,7 +18,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
     apply_smoothing, detect_spindle_regions, convert_regions_to_time,
-    butter_bandpass_filter, extract_spindle_band_power
+    compute_spectrum_numpy, normalize_spectrum
 )
 
 # Abilita deserializzazione
@@ -35,11 +35,9 @@ CONFIG = {
     'max_spindle_duration': 3.0,
     'smoothing_window_sec': 0.25,
     'context_window_sec': 30,
-    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'},
-    'spindle_lowcut': 9, 
-    'spindle_highcut': 15,
-    'filter_order': 4     
+    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
+
 
 def load_autoencoder_with_fallback(model_path):
     """Carica il modello autoencoder con fallback"""
@@ -49,17 +47,19 @@ def load_autoencoder_with_fallback(model_path):
         print(f"⚠️ Errore caricamento {model_path}: {e}")
         return None
 
-def compute_anomaly_scores(encoder, segments, threshold_percentile=90):
+
+def compute_anomaly_scores(encoder, segments):
     """
-    Calcola i punteggi di anomalia per ogni segmento
+    Calcola i punteggi di anomalia usando K-Means clustering
     
     Args:
         encoder: modello encoder
-        segments: segmenti preprocessati
-        threshold_percentile: percentile per definire la soglia di anomalia
+        segments: segmenti preprocessati (shape: n_samples, 1, n_features)
     
     Returns:
-        array di punteggi normalizzati (0-1)
+        scores: array di punteggi normalizzati (0-1)
+        cluster_labels: etichette cluster per ogni segmento
+        kmeans: oggetto KMeans fitted
     """
     # Ottieni features codificate
     features = encoder.predict(segments, verbose=0)
@@ -79,9 +79,13 @@ def compute_anomaly_scores(encoder, segments, threshold_percentile=90):
     distances = np.array(distances)
     
     # Normalizza i punteggi (distanza maggiore = più anomalo = più probabile spindle)
-    scores = (distances - distances.min()) / (distances.max() - distances.min())
+    if distances.max() > distances.min():
+        scores = (distances - distances.min()) / (distances.max() - distances.min())
+    else:
+        scores = np.zeros_like(distances)
     
-    return scores, cluster_labels
+    return scores, cluster_labels, kmeans
+
 
 def compute_z_score_threshold(signal, context_window_samples, threshold_z=2.3):
     """
@@ -119,9 +123,16 @@ def compute_z_score_threshold(signal, context_window_samples, threshold_z=2.3):
     
     return z_scores, threshold_binary
 
+
 def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     """
-    Processa un singolo canale per rilevare spindles con parametri ottimizzati
+    Processa un singolo canale per rilevare spindles usando K-Means clustering
+    
+    Args:
+        channel_name: nome del canale
+        data: dati del canale
+        sfreq: frequenza di campionamento
+        encoder: modello encoder
     
     Returns:
         DataFrame con i risultati dei spindles rilevati
@@ -129,20 +140,10 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     print(f"🔍 Analisi spindles per canale: {channel_name}")
     print(f"📊 Frequenza di campionamento: {sfreq} Hz")
     
-    # Applica bandpass filter
-    print(f"Applicando bandpass filter {CONFIG['spindle_lowcut']}-{CONFIG['spindle_highcut']} Hz...")
-    filtered_data = butter_bandpass_filter(
-        data.reshape(1, -1),  # Assicura forma (1, n_samples)
-        CONFIG['spindle_lowcut'], 
-        CONFIG['spindle_highcut'], 
-        sfreq, 
-        order=CONFIG['filter_order']
-    ).flatten()
-    
     # Prepara segmenti con overlap ottimizzato
     segment_length = int(CONFIG['window_size'] * sfreq)
     segments = segment_signal_with_overlap(
-        filtered_data.reshape(1, -1),
+        data.reshape(1, -1),
         segment_length, 
         CONFIG['overlap_ratio']
     )
@@ -154,36 +155,31 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     print(f"📏 Segmenti generati: {len(segments)}")
     
     try:
-        from signal_processing import compute_spectrum_numpy, normalize_spectrum
-        
+        # Calcola spettri
         spectrums, frequencies = compute_spectrum_numpy(segments, sfreq)
         
-        spindle_spectrums = []
-        for spectrum in spectrums:
-            spindle_band = extract_spindle_band_power(
-                spectrum, 
-                frequencies, 
-                CONFIG['spindle_lowcut'], 
-                CONFIG['spindle_highcut']
-            )
-            spindle_spectrums.append(spindle_band)
-        
-        # Normalizza
-        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spindle_spectrums]
+        # Normalizza spettri
+        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
         
         channel_spectra = np.array([spec[0] for spec in normalized_spectrums])
         encoder_input = channel_spectra.reshape(-1, 1, channel_spectra.shape[1])
         
-        # Ottieni features encoder
-        features = encoder.predict(encoder_input, verbose=0)
-        features_flat = features.reshape(features.shape[0], -1)
+        print(f"   📊 Shape encoder input: {encoder_input.shape}")
         
-        # Calcola anomaly score dalle features encoder
-        encoder_anomaly = np.linalg.norm(features_flat, axis=1)
-        encoder_anomaly = (encoder_anomaly - encoder_anomaly.min()) / (encoder_anomaly.max() - encoder_anomaly.min())
+        # Calcola anomaly scores con K-Means
+        anomaly_scores, cluster_labels, kmeans = compute_anomaly_scores(encoder, encoder_input)
         
-        # Usa direttamente le features dell'encoder come segnale di detection
-        combined_signal = encoder_anomaly
+        print(f"   🎯 K-Means clustering completato")
+        print(f"   📊 Distribuzione cluster: {np.bincount(cluster_labels)}")
+        
+        # Calcola silhouette score per valutare qualità clustering
+        if len(np.unique(cluster_labels)) > 1:
+            features = encoder.predict(encoder_input, verbose=0)
+            features_flat = features.reshape(features.shape[0], -1)
+            silhouette_avg = silhouette_score(features_flat, cluster_labels)
+            print(f"   📈 Silhouette Score: {silhouette_avg:.3f}")
+        
+        combined_signal = anomaly_scores
         
         # Normalizzazione locale con z-score
         context_window_samples = int(CONFIG['context_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
@@ -203,26 +199,24 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
             detection_signal = combined_signal
             binary_threshold = combined_signal >= threshold_val
         
-        # Smoothing temporale con controllo dimensioni
+        # Smoothing temporale
         smoothing_window_samples = int(CONFIG['smoothing_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
         smoothing_window_samples = max(1, min(smoothing_window_samples, len(binary_threshold)))
-        
-        print(f"🔧 Window size per smoothing: {smoothing_window_samples} (lunghezza segnale: {len(binary_threshold)})")
         
         smoothed_binary = apply_smoothing(
             binary_threshold.astype(float), 
             window_size=smoothing_window_samples, 
             method='moving_average'
-        ) >= 0.5  # Riconverti a binario
+        ) >= 0.5
         
-        # Rileva regioni spindle con durate corrette
+        # Rileva regioni spindle
         step_duration = CONFIG['window_size'] * (1 - CONFIG['overlap_ratio'])
         min_duration_samples = int(CONFIG['min_spindle_duration'] / step_duration)
         max_duration_samples = int(CONFIG['max_spindle_duration'] / step_duration)
         
         spindle_regions = detect_spindle_regions(
             smoothed_binary.astype(float), 
-            threshold=0.5,  # Già binario
+            threshold=0.5,
             min_duration_samples=min_duration_samples
         )
         
@@ -243,33 +237,33 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         # Crea DataFrame risultati
         results = []
         for start_time, end_time in time_regions:
-            # Verifica durata finale
             duration = end_time - start_time
             if CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']:
                 results.append({
                     'Canale': channel_name,
                     'Start_Time(s)': round(start_time, 3),
-                    'End_Time(s)': round(end_time, 3)
+                    'End_Time(s)': round(end_time, 3),
+                    'Duration(s)': round(duration, 3)
                 })
         
         print(f"✅ Rilevati {len(results)} spindles per {channel_name}")
-        
-        # Debug info
-        print(f"   📊 Encoder anomaly - Media: {np.mean(encoder_anomaly):.3f}, Std: {np.std(encoder_anomaly):.3f}")
+        print(f"   📊 Anomaly scores - Media: {np.mean(anomaly_scores):.3f}, Std: {np.std(anomaly_scores):.3f}")
         print(f"   📊 Z-scores - Max: {np.max(detection_signal):.2f}, Soglia: {CONFIG['spindle_threshold']}")
-        print(f"   📊 Regioni candidate: {len(spindle_regions)}")
         
         return pd.DataFrame(results)
         
     except Exception as e:
         print(f"❌ Errore durante il processing di {channel_name}: {e}")
-        return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)'])
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Duration(s)'])
+
 
 def main():
     """Funzione principale per clustering e rilevamento spindles"""
     
     # Configurazione percorsi
-    path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
+    path_edf = os.environ.get('DATA_PATH', 'Data/Preprocessed_Edf')
     output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
     current_file = os.environ.get('CURRENT_FILE', None)
     
@@ -303,7 +297,7 @@ def main():
         
         try:
             # Carica dati EEG
-            raw = mne.io.read_raw_edf(file_path, preload=True)
+            raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
             sfreq = raw.info['sfreq']
             
             # Filtra canali
@@ -331,7 +325,7 @@ def main():
                 
                 # Estrai dati del canale
                 channel_idx = raw.ch_names.index(channel_name)
-                channel_data = raw.get_data()[channel_idx:channel_idx+1, :]  # Mantieni dimensione 2D
+                channel_data = raw.get_data()[channel_idx:channel_idx+1, :]
                 
                 # Processa per spindles
                 channel_results = process_channel_for_spindles(
@@ -347,6 +341,8 @@ def main():
                 
         except Exception as e:
             print(f"❌ Errore processando {file}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
     
     # Combina e salva risultati
@@ -357,18 +353,24 @@ def main():
         final_results = final_results.sort_values(['Canale', 'Start_Time(s)'])
         
         # Salva CSV
-        csv_path = os.path.join(cluster_output_path, 'start_end_per_channel.csv')
+        csv_path = os.path.join(cluster_output_path, 'start_end_duration.csv')
         final_results.to_csv(csv_path, index=False)
         
         print(f"\n🎉 Risultati salvati in: {csv_path}")
         print(f"📈 Totale spindles rilevati: {len(final_results)}")
+        print(f"📊 Durata media spindles: {final_results['Duration(s)'].mean():.3f}s")
+        print(f"📊 Durata mediana spindles: {final_results['Duration(s)'].median():.3f}s")
         print("\n📊 Riepilogo per canale:")
-        summary = final_results.groupby('Canale').size()
-        for channel, count in summary.items():
-            print(f"  {channel}: {count} spindles")
+        summary = final_results.groupby('Canale').agg({
+            'Start_Time(s)': 'count',
+            'Duration(s)': ['mean', 'std']
+        }).round(3)
+        summary.columns = ['Count', 'Mean_Duration(s)', 'Std_Duration(s)']
+        print(summary)
         
     else:
         print("❌ Nessun spindle rilevato")
+
 
 if __name__ == "__main__":
     main()

@@ -14,8 +14,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap, 
-    compute_spectrum_numpy, normalize_spectrum,
-    butter_bandpass_filter, extract_spindle_band_power  
+    compute_spectrum_numpy, normalize_spectrum
 )
 
 # Configurazione GPU
@@ -35,10 +34,7 @@ CONFIG = {
     'batch_size': 256,
     'epochs': 200,
     'patience': 20,
-    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'},
-    'spindle_lowcut': 9, 
-    'spindle_highcut': 15,
-    'filter_order': 4     
+    'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
 
 def create_autoencoder_model(n_frequencies):
@@ -64,20 +60,34 @@ def create_autoencoder_model(n_frequencies):
     return autoencoder
 
 def process_edf_files():
-    """Processa i file EDF e addestra gli autoencoder per canale"""
+    """Processa i file EDF preprocessati e addestra gli autoencoder per canale"""
     
     # Configurazione percorsi
-    path_edf = os.environ.get('DATA_PATH', 'Data/Edf')
+    path_edf = os.environ.get('DATA_PATH', 'Data/Preprocessed_Edf')
     output_path = os.environ.get('OUTPUT_PATH', 'Data/Output')
     current_file = os.environ.get('CURRENT_FILE', None)
+    
+    print(f"📂 Path EDF preprocessati: {path_edf}")
+    
+    # Verifica che la cartella esista
+    if not os.path.exists(path_edf):
+        print(f"❌ Errore: cartella {path_edf} non trovata!")
+        print("   Assicurati di aver eseguito il preprocessing dei file EDF")
+        return
     
     # Determina i file da processare
     if current_file:
         dirData = get_file_output_path(output_path, current_file)
         filenames = [current_file]
+        print(f"📁 Modalità file singolo: {current_file}")
     else:
         dirData = output_path
         filenames = [f for f in os.listdir(path_edf) if f.endswith('.edf')]
+        print(f"📁 Modalità batch: {len(filenames)} file preprocessati")
+    
+    if not filenames:
+        print(f"❌ Nessun file .edf trovato in {path_edf}")
+        return
     
     # Crea struttura cartelle
     weights_path = os.path.join(dirData, "model", "canali_individuali")
@@ -89,7 +99,7 @@ def process_edf_files():
     # Aggregazione dati per canale
     aggregated_data = {}
     
-    print("📊 Processamento file EDF...")
+    print("\n📊 Processamento file EDF preprocessati...")
     for file in filenames:
         if not file.endswith('.edf'):
             continue
@@ -98,48 +108,36 @@ def process_edf_files():
         print(f"📁 Processando: {file}")
         
         # Carica file EDF
-        raw = mne.io.read_raw_edf(file_path, preload=True)
+        raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
         sfreq = raw.info['sfreq']
+        
+        print(f"   ✅ File caricato (già filtrato 9-15 Hz)")
+        print(f"   📊 Frequenza: {sfreq} Hz, Durata: {raw.times[-1]:.2f} s")
         
         # Filtra canali
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
         
-        # Applica bandpass filter
+        # Ottieni dati
         raw_data = raw.get_data()
-        print(f"🔊 Applicando bandpass filter {CONFIG['spindle_lowcut']}-{CONFIG['spindle_highcut']} Hz...")
-        filtered_data = butter_bandpass_filter(
-            raw_data, 
-            CONFIG['spindle_lowcut'], 
-            CONFIG['spindle_highcut'], 
-            sfreq, 
-            order=CONFIG['filter_order']
-        )
         
         # Segmentazione con sliding window
         segment_length = int(CONFIG['window_size'] * sfreq)
         segments = segment_signal_with_overlap(
-            filtered_data,  # USA DATI FILTRATI
+            raw_data,
             segment_length, 
             CONFIG['overlap_ratio']
         )
         
+        print(f"   📏 Segmenti generati: {len(segments)}")
+        
         # Calcolo spettri
         spectrums, frequencies = compute_spectrum_numpy(segments, sfreq)
         
-        spindle_spectrums = []
-        for spectrum in spectrums:
-            spindle_band = extract_spindle_band_power(
-                spectrum, 
-                frequencies, 
-                CONFIG['spindle_lowcut'], 
-                CONFIG['spindle_highcut']
-            )
-            spindle_spectrums.append(spindle_band)
+        # Normalizza spettri
+        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
         
-        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spindle_spectrums]
-        
-        print(f"📊 Forma spettro banda spindle: {normalized_spectrums[0].shape}")
+        print(f"   📊 Forma spettro completo: {normalized_spectrums[0].shape}")
         
         # Aggregazione per canale
         for idx, channel in enumerate(raw.ch_names):
@@ -159,6 +157,8 @@ def process_edf_files():
         data = np.array(data)
         n_frequencies = data.shape[1]
         all_segments_standardized = data.reshape((-1, 1, n_frequencies))
+        
+        print(f"   📊 Campioni: {len(data)}, Frequenze: {n_frequencies}")
         
         # Percorsi di salvataggio
         model_path = os.path.join(weights_path, f"autoencoder_{channel}.h5")
@@ -186,6 +186,7 @@ def process_edf_files():
         
         # Salvataggio modello e plot
         autoencoder.save(model_path)
+        print(f"   💾 Modello salvato: {model_path}")
         
         # Plot training history
         plt.figure(figsize=(10, 6))
@@ -199,12 +200,14 @@ def process_edf_files():
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         
+        print(f"   📈 Plot salvato: {plot_path}")
+        
         # Pulizia memoria
         del autoencoder
         tf.keras.backend.clear_session()
         gc.collect()
         
-        print(f"✅ Completato {channel}")
+        print(f"   ✅ Completato {channel}")
 
 if __name__ == "__main__":
     process_edf_files()

@@ -8,7 +8,7 @@ class MLPipelineRunner:
     def __init__(self):
         # self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
         self.base_path = "/mnt/c/Users/nicol/OneDrive/Documenti/GitHub/ML-for-Spindle-Detection-in-EEESWAS"
-        self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Edf"))
+        self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Preprocessed_Edf"))
         self.output_path = os.environ.get('OUTPUT_PATH', os.path.join(self.base_path, "Data/Output"))
         self.current_file = os.environ.get('CURRENT_FILE', None)
         self.pipeline_mode = os.environ.get('PIPELINE_MODE', 'full')  # 'full', 'training_only', 'detection_only'
@@ -134,7 +134,7 @@ class MLPipelineRunner:
         """Restituisce la lista degli script da eseguire in base alla modalità"""
         training_scripts = [
             ("autoencoder/autoencoder_CI_psd_refactored.py", "Autoencoder PSD Refactored", True),
-            ("autoencoder/autoencoder_CI_sovra_psd_refactored.py", "Autoencoder PSD con Alta Sovrapposizione", False)
+            # ("autoencoder/autoencoder_CI_sovra_psd_refactored.py", "Autoencoder PSD con Alta Sovrapposizione", False)
         ]
         
         detection_scripts = [
