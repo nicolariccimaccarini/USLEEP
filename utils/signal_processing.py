@@ -1,59 +1,7 @@
 from sklearn.preprocessing import MinMaxScaler
-from scipy.signal import butter, sosfilt, sosfiltfilt, sosfreqz
 import numpy as np
+import mne
 import os
-
-
-def butter_bandpass(lowcut, highcut, fs, order=4):
-    """
-    Progetta un filtro bandpass Butterworth usando Second-Order Sections (SOS)
-    
-    Args:
-        lowcut: Frequenza di taglio bassa (Hz)
-        highcut: Frequenza di taglio alta (Hz)
-        fs: Frequenza di campionamento (Hz)
-        order: Ordine del filtro (default: 4)
-    
-    Returns:
-        sos: Second-order sections representation of the filter
-    """
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    sos = butter(order, [low, high], analog=False, btype='band', output='sos')
-    
-    return sos
-
-
-def butter_bandpass_filter(data, lowcut, highcut, fs, order=4):
-    """
-    Applica un filtro bandpass Butterworth ai dati usando SOS
-    
-    Args:
-        data: Array numpy (può essere 1D o 2D)
-        lowcut: Frequenza di taglio bassa (Hz)
-        highcut: Frequenza di taglio alta (Hz)
-        fs: Frequenza di campionamento (Hz)
-        order: Ordine del filtro (default: 4)
-    
-    Returns:
-        Dati filtrati (stessa forma dell'input)
-    
-    Note:
-        - Usa sosfiltfilt per filtraggio zero-phase (forward-backward)
-    """
-    sos = butter_bandpass(lowcut, highcut, fs, order=order)
-    
-    # Se data è 2D, applica filtro lungo l'asse corretto
-    if data.ndim == 2:
-        # Filtra ogni canale separatamente
-        filtered = np.zeros_like(data)
-        for i in range(data.shape[0]):
-            filtered[i] = sosfiltfilt(sos, data[i])
-        return filtered
-    else:
-        # Filtraggio 1D
-        return sosfiltfilt(sos, data)
 
 
 def get_file_output_path(base_data_path, filename=None):
@@ -107,7 +55,13 @@ def segment_signal_with_overlap(data, segment_length, overlap_ratio):
 
 
 def compute_spectrum_numpy(segments, freq_sample):
-    """Calcola lo spettro di potenza per ogni segmento"""
+    """
+    Calcola lo spettro di potenza per ogni segmento
+    
+    Note:
+        Per segnali già filtrati in banda spindle (9-15 Hz), 
+        tutto lo spettro è rilevante
+    """
     spectrums = []
     segment_length = segments[0].shape[1]
     frequencies = np.fft.fftfreq(segment_length, d=1/freq_sample)
@@ -160,18 +114,16 @@ def apply_smoothing(signal, window_size, method='moving_average'):
     
     elif method == 'gaussian':
         from scipy.ndimage import gaussian_filter1d
-        sigma = max(0.5, window_size / 4)  # Evita sigma troppo piccolo
+        sigma = max(0.5, window_size / 4)
         return gaussian_filter1d(signal.astype(float), sigma=sigma, mode='nearest')
     
     elif method == 'savgol':
         from scipy.signal import savgol_filter
-        # Savgol richiede finestra dispari e almeno 3 campioni
         if window_size % 2 == 0:
             window_size += 1
         window_size = max(3, window_size)
         window_size = min(window_size, len(signal))
         
-        # Se la finestra è ancora troppo grande, usa il massimo possibile
         if window_size >= len(signal):
             window_size = len(signal) - 1 if len(signal) > 1 else 1
             if window_size % 2 == 0:
@@ -240,21 +192,62 @@ def convert_regions_to_time(regions, segment_length, overlap_ratio, sfreq):
     return time_regions
 
 
-def extract_spindle_band_power(spectrum, frequencies, lowcut=9, highcut=15):
+def mne_bandpass_filter(raw, lowcut=9, highcut=15, filter_length='auto', 
+                        l_trans_bandwidth='auto', h_trans_bandwidth='auto',
+                        method='fir', phase='zero', fir_design='firwin'):
     """
-    Estrae la potenza nella banda degli spindles (9-15 Hz) dallo spettro
+    Applica un filtro bandpass usando MNE
     
     Args:
-        spectrum: spettro di potenza (n_channels, n_frequencies)
-        frequencies: array delle frequenze corrispondenti
-        lowcut: frequenza minima banda spindle
-        highcut: frequenza massima banda spindle
+        raw: mne.io.Raw object
+        lowcut: Frequenza di taglio bassa (Hz)
+        highcut: Frequenza di taglio alta (Hz)
+        filter_length: Lunghezza del filtro ('auto' o numero di campioni)
+        l_trans_bandwidth: Larghezza banda di transizione bassa ('auto' o Hz)
+        h_trans_bandwidth: Larghezza banda di transizione alta ('auto' o Hz)
+        method: 'fir' o 'iir'
+        phase: 'zero' (zero-phase) o 'minimum'
+        fir_design: 'firwin' o 'firwin2'
     
     Returns:
-        potenza nella banda degli spindles
+        mne.io.Raw object filtrato (in-place modification)
     """
-    mask = (frequencies >= lowcut) & (frequencies <= highcut)
-    if spectrum.ndim == 1:
-        return spectrum[mask]
+    raw.filter(
+        l_freq=lowcut,
+        h_freq=highcut,
+        filter_length=filter_length,
+        l_trans_bandwidth=l_trans_bandwidth,
+        h_trans_bandwidth=h_trans_bandwidth,
+        method=method,
+        phase=phase,
+        fir_design=fir_design,
+        verbose=False
+    )
+    return raw
+
+
+def crop_and_save_edf(raw_or_path, output_path, tmin, tmax, include_tmax=True, overwrite=True):
+    """
+    Croppa e salva un file EDF
+    
+    Args:
+        raw_or_path: mne.io.Raw object oppure percorso file EDF di input
+        output_path: Percorso file EDF di output
+        tmin: Tempo di inizio in secondi
+        tmax: Tempo di fine in secondi
+        include_tmax: Se True, include il campione a tmax
+        overwrite: Se True, sovrascrive file esistente
+    
+    Returns:
+        mne.io.Raw object croppato
+    """
+    if isinstance(raw_or_path, str):
+        raw = mne.io.read_raw_edf(raw_or_path, preload=True, verbose=False)
     else:
-        return spectrum[:, mask]
+        raw = raw_or_path
+    
+    raw.crop(tmin=tmin, tmax=tmax, include_tmax=include_tmax)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    raw.export(output_path, overwrite=overwrite)
+    
+    return raw
