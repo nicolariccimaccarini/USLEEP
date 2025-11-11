@@ -5,7 +5,7 @@ winvenv/
 
 # Ignora la cartella Data
 Data/Output
-# Edf_temp/
+Data/Mat_Output
 
 
 src/download_from_hpc.sh
