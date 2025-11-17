@@ -251,3 +251,141 @@ def crop_and_save_edf(raw_or_path, output_path, tmin, tmax, include_tmax=True, o
     raw.export(output_path, overwrite=overwrite)
     
     return raw
+
+
+def compute_morlet_wavelet(data, sfreq, fc=12.5, n_cycles=7):
+    """
+    Applica la trasformata Morlet wavelet al segnale
+    
+    Args:
+        data: segnale (1D array)
+        sfreq: frequenza di campionamento
+        fc: frequenza centrale (Hz)
+        n_cycles: numero di cicli del wavelet
+    
+    Returns:
+        wavelet_complex: segnale wavelet complesso (per estrarre ampiezza e fase)
+    """
+    # Calcola parametri bandwidth
+    s = n_cycles / (2 * np.pi * fc)
+    fb = 2 * s**2
+    
+    # Lunghezza della wavelet in secondi
+    wavelet_duration = n_cycles / fc
+    wavelet_samples = int(wavelet_duration * sfreq * 2)
+    
+    # Crea morlet wavelet
+    t = np.arange(-wavelet_samples/2, wavelet_samples/2) / sfreq
+    morlet_wav = (np.pi * fb)**(-0.5) * np.exp(2j * np.pi * fc * t) * np.exp(-t**2 / fb)
+    
+    # Convoluzione (mantieni risultato complesso)
+    wavelet_signal = np.convolve(data, morlet_wav, mode='same')
+    
+    return wavelet_signal
+
+
+def compute_morlet_features(segments, sfreq, fc_range=[11, 12.5, 14, 15], n_cycles=7):
+    """
+    Estrae feature Morlet multi-scala da segmenti
+    
+    Args:
+        segments: array (n_channels, n_samples)
+        sfreq: frequenza campionamento
+        fc_range: lista di frequenze centrali
+        n_cycles: numero di cicli
+    
+    Returns:
+        features: array (n_channels, n_features)
+            Per ogni fc: [ampiezza_media, ampiezza_max, fase_media, freq_inst_media]
+    """
+    n_channels = segments.shape[0]
+    n_features_per_fc = 4  # ampiezza_media, ampiezza_max, fase_media, freq_inst_media
+    n_features_total = len(fc_range) * n_features_per_fc
+    
+    features = np.zeros((n_channels, n_features_total))
+    
+    for ch_idx in range(n_channels):
+        channel_data = segments[ch_idx, :]
+        feature_idx = 0
+        
+        for fc in fc_range:
+            # Calcola wavelet complesso
+            wavelet_complex = compute_morlet_wavelet(channel_data, sfreq, fc, n_cycles)
+            
+            # Estrai componenti
+            amplitude = np.abs(wavelet_complex)
+            phase = np.angle(wavelet_complex)
+            
+            # Calcola frequenza istantanea
+            phase_diff = np.diff(np.unwrap(phase))
+            instantaneous_freq = (sfreq / (2 * np.pi)) * phase_diff
+            
+            # Feature estratte
+            features[ch_idx, feature_idx] = np.mean(amplitude)      # ampiezza media
+            features[ch_idx, feature_idx + 1] = np.max(amplitude)   # ampiezza max
+            features[ch_idx, feature_idx + 2] = np.mean(phase)      # fase media
+            features[ch_idx, feature_idx + 3] = np.mean(instantaneous_freq) if len(instantaneous_freq) > 0 else 0  # freq inst media
+            
+            feature_idx += n_features_per_fc
+    
+    return features
+
+
+def compute_adaptive_threshold(signal, window_sec=0.1, sfreq=200, threshold_multiplier=4.5):
+    """
+    Calcola threshold adattivo con media mobile
+    
+    Args:
+        signal: segnale wavelet (ampiezza)
+        window_sec: finestra per media mobile (secondi)
+        sfreq: frequenza di campionamento
+        threshold_multiplier: moltiplicatore per la soglia (4.5x)
+    
+    Returns:
+        threshold_signal: array con valori di soglia adattiva
+    """
+    window_samples = int(window_sec * sfreq)
+    
+    # Calcola media mobile
+    from scipy.ndimage import uniform_filter1d
+    moving_avg = uniform_filter1d(signal, size=window_samples, mode='nearest')
+    
+    # Threshold = 4.5 * media mobile
+    threshold_signal = threshold_multiplier * moving_avg
+    
+    return threshold_signal
+
+
+def merge_close_spindles(regions, min_gap_sec=1.0, max_total_duration=3.0):
+    """
+    Unisce spindles vicini secondo criteri
+    
+    Args:
+        regions: lista di tuple (start_time, end_time)
+        min_gap_sec: distanza minima tra spindles (secondi)
+        max_total_duration: durata massima dopo merge (secondi)
+    
+    Returns:
+        merged_regions: lista di regioni unite
+    """
+    if len(regions) == 0:
+        return regions
+    
+    # Ordina per tempo di inizio
+    sorted_regions = sorted(regions, key=lambda x: x[0])
+    merged = [sorted_regions[0]]
+    
+    for current_start, current_end in sorted_regions[1:]:
+        last_start, last_end = merged[-1]
+        
+        # Calcola gap e durata totale se unite
+        gap = current_start - last_end
+        total_duration = current_end - last_start
+        
+        # Unisci se gap < 1s e durata totale < 3s
+        if gap < min_gap_sec and total_duration <= max_total_duration:
+            merged[-1] = (last_start, current_end)
+        else:
+            merged.append((current_start, current_end))
+    
+    return merged
