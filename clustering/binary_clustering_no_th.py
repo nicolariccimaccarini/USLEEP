@@ -91,6 +91,7 @@ def compute_binary_clustering_with_amplitude(encoder, segments, segment_amplitud
         spindle_cluster: ID del cluster identificato come "spindle"
         kmeans: oggetto KMeans fitted
         amplitude_stats: statistiche ampiezze per cluster
+        spindle_segments_info: informazioni sui segmenti spindle rilevati
     """
     # Ottieni features codificate
     features = encoder.predict(segments, verbose=0)
@@ -137,17 +138,39 @@ def compute_binary_clustering_with_amplitude(encoder, segments, segment_amplitud
     # Il cluster spindle è quello con maggiore percentuale di segmenti nel range 10-60 µV
     spindle_cluster = np.argmax(spindle_scores)
     
+    # **NUOVA PARTE: Raccolta info sui segmenti spindle**
+    spindle_mask = cluster_labels == spindle_cluster
+    spindle_segments_info = {
+        'indices': np.where(spindle_mask)[0],  # Indici dei segmenti spindle
+        'amplitudes': segment_amplitudes[spindle_mask],  # Ampiezze dei segmenti spindle
+        'count': spindle_mask.sum()
+    }
+    
     print(f"   🎯 Cluster spindle identificato: {spindle_cluster}")
-    print(f"   📊 Statistiche ampiezze per cluster:")
+    print(f"   📊 Segmenti nel cluster spindle: {spindle_segments_info['count']}/{len(cluster_labels)} "
+          f"({100*spindle_segments_info['count']/len(cluster_labels):.1f}%)")
+    print(f"\n   📊 Statistiche ampiezze per cluster:")
     for i, stats in amplitude_stats.items():
         if stats:
-            print(f"      Cluster {i}: Media={stats['mean']:.2f}µV, "
+            label = "SPINDLE" if i == spindle_cluster else "NON-SPINDLE"
+            print(f"      Cluster {i} ({label}): Media={stats['mean']:.2f}µV, "
                   f"Mediana={stats['median']:.2f}µV, "
                   f"Range=[{stats['min']:.2f}, {stats['max']:.2f}]µV")
-            print(f"                 Segmenti in range spindle: {stats['spindle_range_count']}/{stats['count']} "
+            print(f"                 {'':15} Segmenti totali: {stats['count']}")
+            print(f"                 {'':15} Segmenti in range spindle (10-60µV): {stats['spindle_range_count']} "
                   f"({stats['spindle_percentage']:.1f}%)")
     
-    return cluster_labels, spindle_cluster, kmeans, amplitude_stats
+    # **STAMPA DETTAGLIO SEGMENTI SPINDLE RILEVATI**
+    print(f"\n   🔍 Dettaglio primi 10 segmenti spindle rilevati:")
+    for idx in spindle_segments_info['indices'][:10]:
+        amp = segment_amplitudes[idx]
+        in_range = "✓" if CONFIG['min_amplitude_uv'] <= amp <= CONFIG['max_amplitude_uv'] else "✗"
+        print(f"      Segmento #{idx:4d}: Ampiezza={amp:6.2f}µV {in_range}")
+    
+    if len(spindle_segments_info['indices']) > 10:
+        print(f"      ... e altri {len(spindle_segments_info['indices'])-10} segmenti")
+    
+    return cluster_labels, spindle_cluster, kmeans, amplitude_stats, spindle_segments_info
 
 
 def process_channel_for_spindles(channel_name, data, sfreq, encoder):
@@ -213,13 +236,17 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         
         print(f"   📊 Shape encoder input: {encoder_input.shape}")
         
-        # Clustering binario con validazione ampiezza
-        cluster_labels, spindle_cluster, kmeans, amplitude_stats = compute_binary_clustering_with_amplitude(
+        # Clustering binario con validazione ampiezza (aggiornato)
+        cluster_labels, spindle_cluster, kmeans, amplitude_stats, spindle_segments_info = compute_binary_clustering_with_amplitude(
             encoder, encoder_input, segment_amplitudes
         )
         
         print(f"   🎯 K-Means clustering binario completato")
-        print(f"   📊 Distribuzione cluster: {np.bincount(cluster_labels)}")
+        print(f"   📊 Distribuzione cluster:")
+        for i in range(CONFIG['num_clusters']):
+            label = "SPINDLE" if i == spindle_cluster else "NON-SPINDLE"
+            count = np.sum(cluster_labels == i)
+            print(f"      Cluster {i} ({label}): {count} segmenti ({100*count/len(cluster_labels):.1f}%)")
         
         # Calcola silhouette score per valutare qualità clustering
         if len(np.unique(cluster_labels)) > 1:

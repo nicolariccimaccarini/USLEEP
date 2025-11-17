@@ -1,17 +1,15 @@
 import mne 
-import matplotlib.pyplot as plt
 import pandas as pd
 import os
+import sys
+import gc
 import numpy as np
 import tensorflow as tf
-from sklearn.preprocessing import MinMaxScaler
+import scipy.signal as signal
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-from sklearn.decomposition import PCA
 from tensorflow.keras.models import Model, load_model
-import sys
-from scipy.signal import savgol_filter
-import gc
+from scipy.signal import morlet2
 
 # Aggiungi il percorso utils al path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
@@ -26,15 +24,16 @@ tf.keras.config.enable_unsafe_deserialization()
 
 # Configurazione
 CONFIG = {
-    'window_size': 0.5,
-    'overlap_ratio': 0.2,
-    'num_clusters': 3,
-    'spindle_threshold_type': 'z_score',
-    'spindle_threshold': 2.3,
-    'min_spindle_duration': 0.5,
-    'max_spindle_duration': 3.0,
-    'smoothing_window_sec': 0.25,
-    'context_window_sec': 30,
+    'window_size': 0.5,                         # Ampiezza finestra temporale (s)
+    'overlap_ratio': 0.2,                       # Percentuale di sovrapposizione segmenti
+    'num_clusters': 3,                          # Numero cluster
+    'min_spindle_duration': 0.5,                # Durata minima spindle
+    'max_spindle_duration': 3.0,                # Durata massima spindle
+    'wavelet_fc': 12.5,                         # Frequenza centrale Morlet
+    'wavelet_n_cycles': 7,                      # Numero cicli
+    'threshold_multiplier': 4.5,                # 4.5x media
+    'threshold_window_sec': 0.1,                # Finestra media mobile
+    'merge_gap_sec': 1.0,                       # Gap minimo per merge
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
 
@@ -48,85 +47,9 @@ def load_autoencoder_with_fallback(model_path):
         return None
 
 
-def compute_anomaly_scores(encoder, segments):
-    """
-    Calcola i punteggi di anomalia usando K-Means clustering
-    
-    Args:
-        encoder: modello encoder
-        segments: segmenti preprocessati (shape: n_samples, 1, n_features)
-    
-    Returns:
-        scores: array di punteggi normalizzati (0-1)
-        cluster_labels: etichette cluster per ogni segmento
-        kmeans: oggetto KMeans fitted
-    """
-    # Ottieni features codificate
-    features = encoder.predict(segments, verbose=0)
-    features_flat = features.reshape(features.shape[0], -1)
-    
-    # Clustering per identificare pattern anomali
-    kmeans = KMeans(n_clusters=CONFIG['num_clusters'], random_state=42)
-    cluster_labels = kmeans.fit_predict(features_flat)
-    
-    # Calcola distanze dai centroidi
-    distances = []
-    for i, feature in enumerate(features_flat):
-        cluster_center = kmeans.cluster_centers_[cluster_labels[i]]
-        distance = np.linalg.norm(feature - cluster_center)
-        distances.append(distance)
-    
-    distances = np.array(distances)
-    
-    # Normalizza i punteggi (distanza maggiore = più anomalo = più probabile spindle)
-    if distances.max() > distances.min():
-        scores = (distances - distances.min()) / (distances.max() - distances.min())
-    else:
-        scores = np.zeros_like(distances)
-    
-    return scores, cluster_labels, kmeans
-
-
-def compute_z_score_threshold(signal, context_window_samples, threshold_z=2.3):
-    """
-    Calcola soglia basata su z-score con normalizzazione locale
-    
-    Args:
-        signal: segnale di potenza sigma
-        context_window_samples: finestra per calcolo statistiche locali
-        threshold_z: soglia z-score
-    
-    Returns:
-        array di z-scores, soglia binaria
-    """
-    z_scores = np.zeros_like(signal)
-    
-    for i in range(len(signal)):
-        # Definisci finestra di contesto attorno al campione corrente
-        start_idx = max(0, i - context_window_samples // 2)
-        end_idx = min(len(signal), i + context_window_samples // 2)
-        
-        context = signal[start_idx:end_idx]
-        
-        # Calcola statistiche robuste
-        mean_context = np.mean(context)
-        std_context = np.std(context)
-        
-        # Calcola z-score
-        if std_context > 0:
-            z_scores[i] = (signal[i] - mean_context) / std_context
-        else:
-            z_scores[i] = 0
-    
-    # Applica soglia
-    threshold_binary = z_scores >= threshold_z
-    
-    return z_scores, threshold_binary
-
-
 def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     """
-    Processa un singolo canale per rilevare spindles usando K-Means clustering
+    Processa un singolo canale per rilevare spindles usando Morlet Wavelet
     
     Args:
         channel_name: nome del canale
@@ -138,125 +61,156 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         DataFrame con i risultati dei spindles rilevati
     """
     print(f"🔍 Analisi spindles per canale: {channel_name}")
-    print(f"📊 Frequenza di campionamento: {sfreq} Hz")
     
-    # Prepara segmenti con overlap ottimizzato
-    segment_length = int(CONFIG['window_size'] * sfreq)
-    segments = segment_signal_with_overlap(
-        data.reshape(1, -1),
-        segment_length, 
-        CONFIG['overlap_ratio']
+    # Applica Morlet Wavelet su segnale originale
+    channel_data_1d = data.flatten()
+    wavelet_signal = compute_morlet_wavelet(channel_data_1d, sfreq, fc=12.5, n_cycles=7)
+    
+    print(f"   🌊 Morlet Wavelet applicata (fc=12.5 Hz, n=7 cycles)")
+    
+    # Calcola threshold adattivo (4.5x media mobile con finestra 0.1s)
+    threshold_signal = compute_adaptive_threshold(
+        wavelet_signal, 
+        window_sec=0.1, 
+        sfreq=sfreq, 
+        threshold_multiplier=4.5
     )
     
-    if len(segments) == 0:
-        print(f"⚠️ Nessun segmento generato per {channel_name}")
-        return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)'])
+    # Rileva superamenti threshold
+    above_threshold = wavelet_signal > threshold_signal
     
-    print(f"📏 Segmenti generati: {len(segments)}")
+    # Converti in regioni temporali
+    diff = np.diff(np.concatenate(([False], above_threshold, [False])).astype(int))
+    starts = np.where(diff == 1)[0]
+    ends = np.where(diff == -1)[0]
     
-    try:
-        # Calcola spettri
-        spectrums, frequencies = compute_spectrum_numpy(segments, sfreq)
+    # Filtra per durata (0.5-3.0 secondi)
+    spindle_regions_time = []
+    for start_idx, end_idx in zip(starts, ends):
+        start_time = start_idx / sfreq
+        end_time = end_idx / sfreq
+        duration = end_time - start_time
         
-        # Normalizza spettri
-        normalized_spectrums = [normalize_spectrum(spectrum) for spectrum in spectrums]
+        if CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']:
+            spindle_regions_time.append((start_time, end_time))
+    
+    # Merge spindles vicini (gap < 1s, durata totale < 3s)
+    merged_regions = merge_close_spindles(
+        spindle_regions_time, 
+        min_gap_sec=1.0, 
+        max_total_duration=3.0
+    )
+    
+    # Crea DataFrame risultati
+    results = []
+    for start_time, end_time in merged_regions:
+        duration = end_time - start_time
+        results.append({
+            'Canale': channel_name,
+            'Start_Time(s)': round(start_time, 3),
+            'End_Time(s)': round(end_time, 3),
+            'Duration(s)': round(duration, 3)
+        })
+    
+    print(f"✅ Rilevati {len(results)} spindles per {channel_name}")
+    print(f"   📊 Wavelet amplitude - Media: {np.mean(wavelet_signal):.3f}, Max: {np.max(wavelet_signal):.3f}")
+    
+    return pd.DataFrame(results)
+
+
+def compute_morlet_wavelet(data, sfreq, fc=12.5, n_cycles=7):
+    """
+    Applica la trasformata Morlet wavelet al segnale
+    
+    Args:
+        data: segnale (1D array)
+        sfreq: frequenza di campionamento
+        fc: frequenza centrale (Hz) - per spindles tipicamente 11-15 Hz
+        n_cycles: numero di cicli del wavelet (default 7)
+    
+    Returns:
+        wavelet_signal: segnale trasformato
+    """
+    # Calcola parametri bandwidth
+    s = n_cycles / (2 * np.pi * fc)
+    fb = 2 * s**2
+    
+    # Crea il vettore tempo
+    w = 2 * np.pi * fc
+    
+    # Lunghezza della wavelet in secondi
+    wavelet_duration = n_cycles / fc
+    wavelet_samples = int(wavelet_duration * sfreq * 2)
+    
+    # Crea morlet wavelet
+    t = np.arange(-wavelet_samples/2, wavelet_samples/2) / sfreq
+    morlet_wav = (np.pi * fb)**(-0.5) * np.exp(2j * np.pi * fc * t) * np.exp(-t**2 / fb)
+    
+    # Convoluzione
+    wavelet_signal = np.convolve(data, morlet_wav, mode='same')
+    
+    return np.abs(wavelet_signal)
+
+
+def compute_adaptive_threshold(signal, window_sec=0.1, sfreq=200, threshold_multiplier=4.5):
+    """
+    Calcola threshold adattivo con media mobile
+    
+    Args:
+        signal: segnale wavelet (ampiezza)
+        window_sec: finestra per media mobile (secondi)
+        sfreq: frequenza di campionamento
+        threshold_multiplier: moltiplicatore per la soglia (4.5x)
+    
+    Returns:
+        threshold_signal: array con valori di soglia adattiva
+    """
+    window_samples = int(window_sec * sfreq)
+    
+    # Calcola media mobile
+    from scipy.ndimage import uniform_filter1d
+    moving_avg = uniform_filter1d(signal, size=window_samples, mode='nearest')
+    
+    # Threshold = 4.5 * media mobile
+    threshold_signal = threshold_multiplier * moving_avg
+    
+    return threshold_signal
+
+
+def merge_close_spindles(regions, min_gap_sec=1.0, max_total_duration=3.0, step_duration=0.4):
+    """
+    Unisce spindles vicini secondo criteri
+    
+    Args:
+        regions: lista di tuple (start_time, end_time)
+        min_gap_sec: distanza minima tra spindles (secondi)
+        max_total_duration: durata massima dopo merge (secondi)
+        step_duration: durata step per conversione indici
+    
+    Returns:
+        merged_regions: lista di regioni unite
+    """
+    if len(regions) == 0:
+        return regions
+    
+    # Ordina per tempo di inizio
+    sorted_regions = sorted(regions, key=lambda x: x[0])
+    merged = [sorted_regions[0]]
+    
+    for current_start, current_end in sorted_regions[1:]:
+        last_start, last_end = merged[-1]
         
-        channel_spectra = np.array([spec[0] for spec in normalized_spectrums])
-        encoder_input = channel_spectra.reshape(-1, 1, channel_spectra.shape[1])
+        # Calcola gap e durata totale se unite
+        gap = current_start - last_end
+        total_duration = current_end - last_start
         
-        print(f"   📊 Shape encoder input: {encoder_input.shape}")
-        
-        # Calcola anomaly scores con K-Means
-        anomaly_scores, cluster_labels, kmeans = compute_anomaly_scores(encoder, encoder_input)
-        
-        print(f"   🎯 K-Means clustering completato")
-        print(f"   📊 Distribuzione cluster: {np.bincount(cluster_labels)}")
-        
-        # Calcola silhouette score per valutare qualità clustering
-        if len(np.unique(cluster_labels)) > 1:
-            features = encoder.predict(encoder_input, verbose=0)
-            features_flat = features.reshape(features.shape[0], -1)
-            silhouette_avg = silhouette_score(features_flat, cluster_labels)
-            print(f"   📈 Silhouette Score: {silhouette_avg:.3f}")
-        
-        combined_signal = anomaly_scores
-        
-        # Normalizzazione locale con z-score
-        context_window_samples = int(CONFIG['context_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
-        context_window_samples = max(1, min(context_window_samples, len(combined_signal)))
-        
-        if CONFIG['spindle_threshold_type'] == 'z_score':
-            z_scores, threshold_binary = compute_z_score_threshold(
-                combined_signal, 
-                context_window_samples, 
-                CONFIG['spindle_threshold']
-            )
-            detection_signal = z_scores
-            binary_threshold = threshold_binary
+        # Unisci se gap < 1s e durata totale < 3s
+        if gap < min_gap_sec and total_duration <= max_total_duration:
+            merged[-1] = (last_start, current_end)
         else:
-            # Fallback a percentile
-            threshold_val = np.percentile(combined_signal, CONFIG['spindle_threshold'])
-            detection_signal = combined_signal
-            binary_threshold = combined_signal >= threshold_val
-        
-        # Smoothing temporale
-        smoothing_window_samples = int(CONFIG['smoothing_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
-        smoothing_window_samples = max(1, min(smoothing_window_samples, len(binary_threshold)))
-        
-        smoothed_binary = apply_smoothing(
-            binary_threshold.astype(float), 
-            window_size=smoothing_window_samples, 
-            method='moving_average'
-        ) >= 0.5
-        
-        # Rileva regioni spindle
-        step_duration = CONFIG['window_size'] * (1 - CONFIG['overlap_ratio'])
-        min_duration_samples = int(CONFIG['min_spindle_duration'] / step_duration)
-        max_duration_samples = int(CONFIG['max_spindle_duration'] / step_duration)
-        
-        spindle_regions = detect_spindle_regions(
-            smoothed_binary.astype(float), 
-            threshold=0.5,
-            min_duration_samples=min_duration_samples
-        )
-        
-        # Filtra per durata massima
-        spindle_regions = [
-            (start, end) for start, end in spindle_regions 
-            if end - start <= max_duration_samples
-        ]
-        
-        # Converti in tempi reali
-        time_regions = convert_regions_to_time(
-            spindle_regions, 
-            segment_length, 
-            CONFIG['overlap_ratio'], 
-            sfreq
-        )
-        
-        # Crea DataFrame risultati
-        results = []
-        for start_time, end_time in time_regions:
-            duration = end_time - start_time
-            if CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']:
-                results.append({
-                    'Canale': channel_name,
-                    'Start_Time(s)': round(start_time, 3),
-                    'End_Time(s)': round(end_time, 3),
-                    'Duration(s)': round(duration, 3)
-                })
-        
-        print(f"✅ Rilevati {len(results)} spindles per {channel_name}")
-        print(f"   📊 Anomaly scores - Media: {np.mean(anomaly_scores):.3f}, Std: {np.std(anomaly_scores):.3f}")
-        print(f"   📊 Z-scores - Max: {np.max(detection_signal):.2f}, Soglia: {CONFIG['spindle_threshold']}")
-        
-        return pd.DataFrame(results)
-        
-    except Exception as e:
-        print(f"❌ Errore durante il processing di {channel_name}: {e}")
-        import traceback
-        traceback.print_exc()
-        return pd.DataFrame(columns=['Canale', 'Start_Time(s)', 'End_Time(s)', 'Duration(s)'])
+            merged.append((current_start, current_end))
+    
+    return merged
 
 
 def main():
