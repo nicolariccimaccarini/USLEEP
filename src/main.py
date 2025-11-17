@@ -138,9 +138,15 @@ class MLPipelineRunner:
         ]
         
         detection_scripts = [
+<<<<<<< HEAD
             # ("clustering/clustering_with_spindle_detection.py", "Clustering e Rilevamento Spindles", True)
             ("clustering/binary_clustering_no_th.py", "Clustering Binario senza Threshold", True)
             # ("clustering/hybrid_clustering_amplitude.py", "Clustering ibrido che combina calcolo ampiezza e distanza centroidi tramite percentile", True)
+=======
+            ("clustering/clustering_with_spindle_detection.py", "Clustering e Rilevamento Spindles", True)
+            ("clustering/binary_clustering_no_th.py", "Clustering Binario senza Threshold", True)
+            ("clustering/hybrid_clustering_amplitude.py", "Clustering ibrido che combina calcolo ampiezza e distanza centroidi tramite percentile", True)
+>>>>>>> 8f176d2 (changes)
         ]
         
         if self.pipeline_mode == 'training_only':

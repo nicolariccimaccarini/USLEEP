@@ -8,6 +8,7 @@ Data/Output
 Data/Mat_Output
 Data/Edf
 Data/old_Edf
+Data/weights
 
 
 src/download_from_hpc.sh
