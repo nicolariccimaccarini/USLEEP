@@ -6,8 +6,8 @@ from datetime import datetime
 
 class MLPipelineRunner:
     def __init__(self):
-        # self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
-        self.base_path = "/mnt/c/Users/nicol/OneDrive/Documenti/GitHub/ML-for-Spindle-Detection-in-EEESWAS"
+        self.base_path = "/hpc/groups/users-ai/EEG/ML-for-Spindle-Detection-in-EEESWAS/"
+        # self.base_path = "/mnt/c/Users/nicol/OneDrive/Documenti/GitHub/ML-for-Spindle-Detection-in-EEESWAS"
         self.data_path = os.environ.get('DATA_PATH', os.path.join(self.base_path, "Data/Preprocessed_Edf"))
         self.output_path = os.environ.get('OUTPUT_PATH', os.path.join(self.base_path, "Data/Output"))
         self.current_file = os.environ.get('CURRENT_FILE', None)
@@ -133,20 +133,13 @@ class MLPipelineRunner:
     def get_pipeline_scripts(self):
         """Restituisce la lista degli script da eseguire in base alla modalità"""
         training_scripts = [
-            ("autoencoder/autoencoder_CI_psd_refactored.py", "Autoencoder PSD Refactored", True),
+            # ("autoencoder/autoencoder_CI_psd_refactored.py", "Autoencoder PSD Refactored", True),
             # ("autoencoder/autoencoder_CI_sovra_psd_refactored.py", "Autoencoder PSD con Alta Sovrapposizione", False)
+	    ("autoencoder/autoencoder_morlet_wavelet.py", "Autoencoder con estrazione feature Morlet Wavelet", True)
         ]
         
         detection_scripts = [
-<<<<<<< HEAD
-            # ("clustering/clustering_with_spindle_detection.py", "Clustering e Rilevamento Spindles", True)
-            ("clustering/binary_clustering_no_th.py", "Clustering Binario senza Threshold", True)
-            # ("clustering/hybrid_clustering_amplitude.py", "Clustering ibrido che combina calcolo ampiezza e distanza centroidi tramite percentile", True)
-=======
             ("clustering/clustering_with_spindle_detection.py", "Clustering e Rilevamento Spindles", True)
-            ("clustering/binary_clustering_no_th.py", "Clustering Binario senza Threshold", True)
-            ("clustering/hybrid_clustering_amplitude.py", "Clustering ibrido che combina calcolo ampiezza e distanza centroidi tramite percentile", True)
->>>>>>> 8f176d2 (changes)
         ]
         
         if self.pipeline_mode == 'training_only':
