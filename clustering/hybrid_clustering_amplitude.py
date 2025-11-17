@@ -80,7 +80,7 @@ def compute_segment_amplitudes(segments, sfreq):
 def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_amplitudes):
     """
     Calcola anomaly scores usando K-Means (3 cluster) con distanza dai centroidi
-    e validazione tramite ampiezza
+    e validazione tramite ampiezza (percentili 5-95)
     
     Args:
         encoder: modello encoder
@@ -97,7 +97,6 @@ def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_ampl
     features = encoder.predict(segments, verbose=0)
     features_flat = features.reshape(features.shape[0], -1)
     
-    # Clustering a 3 vie
     kmeans = KMeans(n_clusters=CONFIG['num_clusters'], random_state=42)
     cluster_labels = kmeans.fit_predict(features_flat)
     
@@ -116,6 +115,12 @@ def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_ampl
     else:
         anomaly_scores = np.zeros_like(distances)
     
+    # Calcola percentili 5 e 95 delle ampiezze
+    amp_p5 = np.percentile(segment_amplitudes, 5)
+    amp_p95 = np.percentile(segment_amplitudes, 95)
+    
+    print(f"   📊 Percentili ampiezza - P5: {amp_p5:.2f}µV, P95: {amp_p95:.2f}µV")
+    
     # Analizza ampiezze per ogni cluster
     amplitude_stats = {}
     
@@ -125,13 +130,27 @@ def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_ampl
             cluster_amplitudes = segment_amplitudes[cluster_mask]
             cluster_anomaly_scores = anomaly_scores[cluster_mask]
             
-            # Conta segmenti nel range spindle
+            # Conta segmenti nel range spindle (10-60 µV)
             in_spindle_range = np.sum(
                 (cluster_amplitudes >= CONFIG['min_amplitude_uv']) & 
                 (cluster_amplitudes <= CONFIG['max_amplitude_uv'])
             )
             
+            # Conta segmenti nel range percentile (5-95)
+            in_percentile_range = np.sum(
+                (cluster_amplitudes >= amp_p5) & 
+                (cluster_amplitudes <= amp_p95)
+            )
+            
+            # Conta segmenti che soddisfano entrambe le condizioni
+            in_both_ranges = np.sum(
+                (cluster_amplitudes >= max(CONFIG['min_amplitude_uv'], amp_p5)) & 
+                (cluster_amplitudes <= min(CONFIG['max_amplitude_uv'], amp_p95))
+            )
+            
             spindle_percentage = (in_spindle_range / cluster_mask.sum()) * 100
+            percentile_percentage = (in_percentile_range / cluster_mask.sum()) * 100
+            both_percentage = (in_both_ranges / cluster_mask.sum()) * 100
             
             amplitude_stats[i] = {
                 'mean': np.mean(cluster_amplitudes),
@@ -142,6 +161,10 @@ def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_ampl
                 'count': cluster_mask.sum(),
                 'spindle_range_count': in_spindle_range,
                 'spindle_percentage': spindle_percentage,
+                'percentile_range_count': in_percentile_range,
+                'percentile_percentage': percentile_percentage,
+                'both_ranges_count': in_both_ranges,
+                'both_percentage': both_percentage,
                 'mean_anomaly_score': np.mean(cluster_anomaly_scores),
                 'median_anomaly_score': np.median(cluster_anomaly_scores)
             }
@@ -152,17 +175,19 @@ def compute_hybrid_anomaly_scores_with_amplitude(encoder, segments, segment_ampl
     for i, stats in amplitude_stats.items():
         if stats:
             print(f"      Cluster {i}: Count={stats['count']}, "
-                  f"Ampiezza Media={stats['mean']:.2f}µV, "
-                  f"In range spindle={stats['spindle_percentage']:.1f}%")
+                  f"Ampiezza Media={stats['mean']:.2f}µV")
+            print(f"                 Range 10-60µV: {stats['spindle_percentage']:.1f}%")
+            print(f"                 Range P5-P95: {stats['percentile_percentage']:.1f}%")
+            print(f"                 Entrambi i range: {stats['both_percentage']:.1f}%")
             print(f"                 Anomaly Score Medio={stats['mean_anomaly_score']:.3f}")
     
-    return anomaly_scores, cluster_labels, kmeans, amplitude_stats
+    return anomaly_scores, cluster_labels, kmeans, amplitude_stats, amp_p5, amp_p95
 
 
 def process_channel_for_spindles(channel_name, data, sfreq, encoder):
     """
     Processa un singolo canale per rilevare spindles usando clustering ibrido
-    (K-Means 3 cluster + distanze centroidi + validazione ampiezza)
+    (K-Means 3 cluster + distanze centroidi + validazione ampiezza con percentili)
     
     Args:
         channel_name: nome del canale
@@ -224,7 +249,7 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         print(f"   📊 Shape encoder input: {encoder_input.shape}")
         
         # Clustering ibrido con anomaly scores e validazione ampiezza
-        anomaly_scores, cluster_labels, kmeans, amplitude_stats = compute_hybrid_anomaly_scores_with_amplitude(
+        anomaly_scores, cluster_labels, kmeans, amplitude_stats, amp_p5, amp_p95 = compute_hybrid_anomaly_scores_with_amplitude(
             encoder, encoder_input, segment_amplitudes
         )
         
@@ -242,15 +267,23 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
         anomaly_threshold = np.percentile(anomaly_scores, CONFIG['anomaly_percentile'])
         print(f"   🎯 Soglia anomaly (percentile {CONFIG['anomaly_percentile']}): {anomaly_threshold:.3f}")
         
-        # Segnale binario: anomaly score alto E ampiezza valida
+        # Segnale binario: anomaly score alto E ampiezza valida (10-60 µV E percentili 5-95)
         anomaly_binary = (anomaly_scores >= anomaly_threshold).astype(float)
+        
+        # Condizione combinata: range assoluto (10-60 µV) E range percentile (5-95)
         amplitude_binary = (
             (segment_amplitudes >= CONFIG['min_amplitude_uv']) & 
-            (segment_amplitudes <= CONFIG['max_amplitude_uv'])
+            (segment_amplitudes <= CONFIG['max_amplitude_uv']) &
+            (segment_amplitudes >= amp_p5) &
+            (segment_amplitudes <= amp_p95)
         ).astype(float)
         
         # Combinazione: entrambe le condizioni devono essere soddisfatte
         binary_detection = anomaly_binary * amplitude_binary
+        
+        print(f"   📊 Segmenti che soddisfano tutti i criteri: "
+              f"{binary_detection.sum()}/{len(binary_detection)} "
+              f"({100*binary_detection.sum()/len(binary_detection):.1f}%)")
         
         # Smoothing temporale per ridurre falsi positivi
         smoothing_window_samples = int(CONFIG['smoothing_window_sec'] / CONFIG['window_size'] * (1 - CONFIG['overlap_ratio']))
@@ -305,15 +338,18 @@ def process_channel_for_spindles(channel_name, data, sfreq, encoder):
                 mean_anomaly = np.mean(region_anomaly_scores) if len(region_anomaly_scores) > 0 else 0
                 dominant_cluster = np.bincount(region_clusters).argmax() if len(region_clusters) > 0 else -1
                 
-                results.append({
-                    'Canale': channel_name,
-                    'Start_Time(s)': round(start_time, 3),
-                    'End_Time(s)': round(end_time, 3),
-                    'Duration(s)': round(duration, 3),
-                    'Mean_Amplitude(µV)': round(mean_amplitude, 2),
-                    'Mean_Anomaly_Score': round(mean_anomaly, 3),
-                    'Dominant_Cluster': int(dominant_cluster)
-                })
+                # Verifica che l'ampiezza media sia nel range richiesto
+                if (CONFIG['min_amplitude_uv'] <= mean_amplitude <= CONFIG['max_amplitude_uv'] and
+                    amp_p5 <= mean_amplitude <= amp_p95):
+                    results.append({
+                        'Canale': channel_name,
+                        'Start_Time(s)': round(start_time, 3),
+                        'End_Time(s)': round(end_time, 3),
+                        'Duration(s)': round(duration, 3),
+                        'Mean_Amplitude(µV)': round(mean_amplitude, 2),
+                        'Mean_Anomaly_Score': round(mean_anomaly, 3),
+                        'Dominant_Cluster': int(dominant_cluster)
+                    })
         
         spindle_percentage = (binary_detection.sum() / len(binary_detection)) * 100
         print(f"✅ Rilevati {len(results)} spindles per {channel_name}")

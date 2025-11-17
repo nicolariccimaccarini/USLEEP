@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description='Filtra e croppa file EDF con MNE')
     parser.add_argument('--input', required=True, help='File EDF di input')
     parser.add_argument('--output', required=True, help='File EDF di output')
-    parser.add_argument('--lowcut', type=float, default=9, help='Freq. taglio bassa (Hz)')
-    parser.add_argument('--highcut', type=float, default=15, help='Freq. taglio alta (Hz)')
+    # parser.add_argument('--lowcut', type=float, default=9, help='Freq. taglio bassa (Hz)')
+    # parser.add_argument('--highcut', type=float, default=15, help='Freq. taglio alta (Hz)')
     parser.add_argument('--tmin', type=float, default=None, help='Tempo inizio crop (s)')
     parser.add_argument('--tmax', type=float, default=None, help='Tempo fine crop (s)')
     
@@ -22,7 +22,7 @@ def main():
     print(f"🔧 Configurazione:")
     print(f"   Input: {args.input}")
     print(f"   Output: {args.output}")
-    print(f"   Bandpass: {args.lowcut}-{args.highcut} Hz")
+    # print(f"   Bandpass: {args.lowcut}-{args.highcut} Hz")
     if args.tmin is not None and args.tmax is not None:
         print(f"   Crop: {args.tmin}-{args.tmax} s")
     
@@ -31,8 +31,8 @@ def main():
     print(f"\n✅ File caricato: durata {raw.times[-1]:.2f} s")
     
     # Filtra
-    print(f"🔊 Applicando bandpass filter...")
-    mne_bandpass_filter(raw, lowcut=args.lowcut, highcut=args.highcut)
+    # print(f"🔊 Applicando bandpass filter...")
+    # mne_bandpass_filter(raw, lowcut=args.lowcut, highcut=args.highcut)
     
     # Croppa e salva
     if args.tmin is not None and args.tmax is not None:
