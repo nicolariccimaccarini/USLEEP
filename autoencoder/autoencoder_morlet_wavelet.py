@@ -14,7 +14,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
-    compute_morlet_features  # NUOVA FUNZIONE
+    compute_morlet_features, mne_bandpass_filter
 )
 
 # ...existing code...
@@ -110,6 +110,10 @@ def process_edf_files():
         # Filtra canali
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
+
+        print(f"🔧 Applicazione filtro bandpass 5-35 Hz")
+        raw = mne_bandpass_filter(raw, lowcut=5, highcut=35)
+        print(f"✅ Filtro applicato")
         
         # Ottieni dati
         raw_data = raw.get_data()

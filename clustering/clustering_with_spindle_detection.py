@@ -134,10 +134,11 @@ def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
     # Reshape per encoder
     features_reshaped = features_normalized.reshape(-1, 1, features_normalized.shape[1])
     
-    # Calcola reconstruction error
     try:
         predictions = encoder.predict(features_reshaped, verbose=0)
-        reconstruction_errors = np.mean((features_reshaped - predictions)**2, axis=(1,2))
+        
+        # Calcola reconstruction error (MSE tra input e output ricostruito)
+        reconstruction_errors = np.mean((features_reshaped - predictions)**2, axis=(1, 2))        
     except Exception as e:
         print(f"   ⚠️ Errore prediction autoencoder: {e}")
     
@@ -229,6 +230,7 @@ def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
     
     print(f"   🔗 Dopo merge: {len(merged_regions)} spindles")
     
+    # Creazione risultati
     results = []
     for start_time, end_time in merged_regions:
         duration = end_time - start_time
@@ -327,30 +329,23 @@ def main():
                 if autoencoder is None:
                     continue
                 
-                # Crea encoder
-                try:
-                    encoder = Model(
-                        inputs=autoencoder.input,
-                        outputs=autoencoder.get_layer('encoder_dense').output
-                    )
-                except:
-                    # Fallback: usa intero autoencoder
-                    encoder = autoencoder
+                print(f"   🤖 Modello caricato: {model_path}")
+                print(f"   📊 Input shape: {autoencoder.input_shape}")
+                print(f"   📊 Output shape: {autoencoder.output_shape}")
                 
                 # Estrai dati del canale
                 channel_idx = raw.ch_names.index(channel_name)
                 channel_data = raw.get_data()[channel_idx:channel_idx+1, :]
                 
-                # Processa per spindles con approccio ibrido
                 channel_results = process_channel_for_spindles_hybrid(
-                    channel_name, channel_data, sfreq, encoder
+                    channel_name, channel_data, sfreq, autoencoder
                 )
                 
                 if len(channel_results) > 0:
                     all_spindle_results.append(channel_results)
                 
                 # Pulizia memoria
-                del autoencoder, encoder
+                del autoencoder
                 gc.collect()
                 
         except Exception as e:

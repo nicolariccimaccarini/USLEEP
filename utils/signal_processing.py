@@ -192,7 +192,7 @@ def convert_regions_to_time(regions, segment_length, overlap_ratio, sfreq):
     return time_regions
 
 
-def mne_bandpass_filter(raw, lowcut=9, highcut=15, filter_length='auto', 
+def mne_bandpass_filter(raw, lowcut, highcut, filter_length='auto', 
                         l_trans_bandwidth='auto', h_trans_bandwidth='auto',
                         method='fir', phase='zero', fir_design='firwin'):
     """
