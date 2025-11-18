@@ -14,42 +14,65 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
-    compute_morlet_features, mne_bandpass_filter
+    compute_morlet_wavelet, mne_bandpass_filter
 )
 
-# ...existing code...
 
 CONFIG = {
-    'window_size': 0.5,
-    'overlap_ratio': 0.2,
+    'window_size': 0.5,                             # Finestra segmento (s)
+    'overlap_ratio': 0.5,                           # 50% overlap per smoothing
     'batch_size': 256,
     'epochs': 200,
     'patience': 20,
-    'wavelet_fc_range': [11, 12.5, 14, 15],         # Range frequenze centrali
+    'wavelet_fc': 13.5,                             # Frequenza centrale (Hz) - centro banda sigma
     'wavelet_n_cycles': 7,                          # Numero cicli Morlet
+    'n_envelope_features': 4,                       # Feature estratte da envelope
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
 
-def create_autoencoder_model(n_features):
+
+def extract_envelope_features(envelope_segment):
     """
-    Crea l'architettura dell'autoencoder per feature Morlet
+    Estrae feature statistiche semplici dall'envelope Morlet
     
     Args:
-        n_features: numero di feature in input (ampiezza + fase + freq_inst per ogni fc)
+        envelope_segment: array 1D di ampiezza Morlet
+    
+    Returns:
+        array di 4 feature: [mean, std, max, median]
+    """
+    return np.array([
+        np.mean(envelope_segment),      # Ampiezza media
+        np.std(envelope_segment),       # Variabilità
+        np.max(envelope_segment),       # Picco massimo
+        np.median(envelope_segment)     # Valore mediano
+    ])
+
+
+def create_autoencoder_model(n_features=4):
+    """
+    Crea l'architettura dell'autoencoder per feature envelope Morlet
+    
+    Args:
+        n_features: numero di feature in input (default: 4 statistiche base)
+    
+    Returns:
+        modello autoencoder compilato
     """
     input_layer = Input(shape=(1, n_features))
     
-    # Encoder LSTM
-    encoded = LSTM(128, activation='relu', return_sequences=True, name='encoder_lstm_1')(input_layer)
-    encoded = LSTM(64, activation='relu', return_sequences=True, name='encoder_lstm_2')(encoded)
+    # Encoder LSTM 
+    encoded = LSTM(64, activation='relu', return_sequences=True, name='encoder_lstm_1')(input_layer)
+    encoded = LSTM(32, activation='relu', return_sequences=True, name='encoder_lstm_2')(encoded)
     encoded = Dropout(0.2, name='encoder_dropout')(encoded)
-    encoded = LSTM(32, activation='relu', return_sequences=False, name='encoder_lstm_3')(encoded)
-    encoded = Dense(32, activation='relu', name='encoder_dense')(encoded)
+    encoded = LSTM(16, activation='relu', return_sequences=False, name='encoder_lstm_3')(encoded)
+    encoded = Dense(8, activation='relu', name='encoder_dense')(encoded)
     
-    # Decoder
+    # Decoder 
     decoded = RepeatVector(1, name='repeat_vector')(encoded)
-    decoded = LSTM(64, activation='relu', return_sequences=True, name='decoded_lstm_1')(decoded)
-    decoded = LSTM(128, activation='relu', return_sequences=True, name='decoded_lstm_2')(decoded)
+    decoded = LSTM(16, activation='relu', return_sequences=True, name='decoder_lstm_1')(decoded)
+    decoded = LSTM(32, activation='relu', return_sequences=True, name='decoder_lstm_2')(decoded)
+    decoded = LSTM(64, activation='relu', return_sequences=True, name='decoder_lstm_3')(decoded)
     decoded = TimeDistributed(Dense(n_features), name='time_distributed_output')(decoded)
     
     autoencoder = Model(inputs=input_layer, outputs=decoded)
@@ -57,8 +80,19 @@ def create_autoencoder_model(n_features):
     
     return autoencoder
 
+
 def process_edf_files():
-    """Processa i file EDF preprocessati e addestra gli autoencoder per canale"""
+    """
+    Processa i file EDF con Morlet Wavelet e addestra autoencoder su envelope
+    
+    Pipeline:
+    1. Carica segnale grezzo (NO pre-filtering)
+    2. Applica Morlet Wavelet per canale
+    3. Estrai envelope (ampiezza)
+    4. Segmenta envelope
+    5. Estrai feature statistiche da ogni segmento
+    6. Addestra autoencoder per anomaly detection
+    """
     
     # Configurazione percorsi
     path_edf = os.environ.get('DATA_PATH', 'Data/Preprocessed_Edf')
@@ -95,13 +129,15 @@ def process_edf_files():
     # Aggregazione dati per canale
     aggregated_data = {}
     
-    print("\n📊 Processamento file EDF con Morlet Wavelet Features...")
+    print("\n📊 Processamento file EDF con Morlet Envelope...")
+    print(f"   🌊 Parametri Morlet: fc={CONFIG['wavelet_fc']} Hz, cycles={CONFIG['wavelet_n_cycles']}")
+    
     for file in filenames:
         if not file.endswith('.edf'):
             continue
             
         file_path = os.path.join(path_edf, file)
-        print(f"📁 Processando: {file}")
+        print(f"\n📁 Processando: {file}")
         
         # Carica file EDF
         raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
@@ -110,62 +146,77 @@ def process_edf_files():
         # Filtra canali
         channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
         raw.pick_channels(channels_to_include)
-
-        print(f"🔧 Applicazione filtro bandpass 5-35 Hz")
-        raw = mne_bandpass_filter(raw, lowcut=5, highcut=35)
-        print(f"✅ Filtro applicato")
         
-        # Ottieni dati
+        print(f"   📊 Canali: {len(channels_to_include)}, Frequenza: {sfreq} Hz")
+        
         raw_data = raw.get_data()
         
-        # Segmentazione con sliding window
         segment_length = int(CONFIG['window_size'] * sfreq)
-        segments = segment_signal_with_overlap(
-            raw_data,
-            segment_length, 
-            CONFIG['overlap_ratio']
-        )
         
-        print(f"   📏 Segmenti generati: {len(segments)}")
+        print(f"   🔧 Lunghezza segmento: {segment_length} campioni ({CONFIG['window_size']}s)")
         
-        morlet_features_all = []
-        
-        for segment in segments:
-            # Calcola feature Morlet per ogni segmento
-            segment_features = compute_morlet_features(
-                segment, 
+        # Processa ogni canale
+        for ch_idx, channel in enumerate(raw.ch_names):
+            channel_data = raw_data[ch_idx]
+            
+            # Morlet Wavelet Transform
+            wavelet_complex = compute_morlet_wavelet(
+                channel_data, 
                 sfreq, 
-                fc_range=CONFIG['wavelet_fc_range'],
+                fc=CONFIG['wavelet_fc'],
                 n_cycles=CONFIG['wavelet_n_cycles']
             )
-            morlet_features_all.append(segment_features)
-        
-        morlet_features_all = np.array(morlet_features_all)
-        n_features = morlet_features_all.shape[2]  # feature per canale
-        
-        print(f"   🌊 Feature Morlet estratte: {morlet_features_all.shape}")
-        print(f"   📊 Feature per segmento: {n_features}")
-        
-        # Aggregazione per canale
-        for idx, channel in enumerate(raw.ch_names):
+            
+            # Estrai envelope (ampiezza)
+            envelope = np.abs(wavelet_complex)
+            
+            # Segmenta envelope
+            envelope_reshaped = envelope.reshape(1, -1)
+            envelope_segments = segment_signal_with_overlap(
+                envelope_reshaped,
+                segment_length,
+                CONFIG['overlap_ratio']
+            )
+            
+            # Estrai feature da ogni segmento envelope
+            channel_features = []
+            for seg in envelope_segments:
+                seg_1d = seg.flatten()
+                features = extract_envelope_features(seg_1d)
+                channel_features.append(features)
+            
             if channel not in aggregated_data:
                 aggregated_data[channel] = []
-            for morlet_feat in morlet_features_all:
-                aggregated_data[channel].append(morlet_feat[idx])
+            
+            # Aggiungi feature
+            aggregated_data[channel].extend(channel_features)
+        
+        print(f"   ✅ File processato: {len(envelope_segments)} segmenti per canale")
+    
+    # Verifica aggregazione
+    if not aggregated_data:
+        print("❌ Nessun dato aggregato!")
+        return
+    
+    print(f"\n📊 Dati aggregati per {len(aggregated_data)} canali")
     
     # Training degli autoencoder
     strategy = tf.distribute.MirroredStrategy()
     
-    print(f"\n🤖 Addestramento autoencoder su feature Morlet per {len(aggregated_data)} canali...")
+    print(f"\n🤖 Addestramento autoencoder su envelope features...")
     for channel_idx, (channel, data) in enumerate(aggregated_data.items(), 1):
         print(f"\n🔧 Canale {channel} ({channel_idx}/{len(aggregated_data)})")
         
         # Preparazione dati
         data = np.array(data)
-        n_features = data.shape[1]
-        all_segments_standardized = data.reshape((-1, 1, n_features))
+        n_samples = data.shape[0]
+        n_features = CONFIG['n_envelope_features']
         
-        print(f"   📊 Campioni: {len(data)}, Feature Morlet: {n_features}")
+        # Reshape per autoencoder: (n_samples, 1, n_features)
+        data_reshaped = data.reshape((-1, 1, n_features))
+        
+        print(f"   📊 Campioni: {n_samples}, Feature: {n_features}")
+        print(f"   📐 Shape input: {data_reshaped.shape}")
         
         # Percorsi di salvataggio
         model_path = os.path.join(weights_path, f"autoencoder_{channel}.h5")
@@ -175,6 +226,8 @@ def process_edf_files():
         with strategy.scope():
             autoencoder = create_autoencoder_model(n_features)
         
+        print(f"   🏗️ Modello creato: {autoencoder.count_params()} parametri")
+        
         early_stopping = EarlyStopping(
             monitor='val_loss', 
             patience=CONFIG['patience'], 
@@ -183,7 +236,7 @@ def process_edf_files():
         )
         
         history = autoencoder.fit(
-            all_segments_standardized, all_segments_standardized,
+            data_reshaped, data_reshaped,
             epochs=CONFIG['epochs'],
             batch_size=CONFIG['batch_size'],
             validation_split=0.2,
@@ -191,19 +244,24 @@ def process_edf_files():
             verbose=0
         )
         
-        # Salvataggio modello e plot
+        final_loss = history.history['loss'][-1]
+        final_val_loss = history.history['val_loss'][-1]
+        print(f"   📉 Loss finale: {final_loss:.6f}, Val Loss: {final_val_loss:.6f}")
+        
+        # Salvataggio modello
         autoencoder.save(model_path)
         print(f"   💾 Modello salvato: {model_path}")
         
         # Plot training history
         plt.figure(figsize=(10, 6))
-        plt.plot(history.history["loss"], 'r', marker='.', label="Train Loss")
-        plt.plot(history.history["val_loss"], 'b--', marker='.', label="Validation Loss")
-        plt.title(f"Training History (Morlet Features) - {channel}")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.grid(True)
+        plt.plot(history.history["loss"], 'r', marker='.', label="Train Loss", linewidth=2)
+        plt.plot(history.history["val_loss"], 'b--', marker='.', label="Validation Loss", linewidth=2)
+        plt.title(f"Training History (Morlet Envelope) - {channel}", fontsize=14, fontweight='bold')
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Loss (MSE)", fontsize=12)
+        plt.legend(fontsize=11)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -216,6 +274,6 @@ def process_edf_files():
         
         print(f"   ✅ Completato {channel}")
 
+
 if __name__ == "__main__":
     process_edf_files()
-    print("\n🎉 Addestramento completato con feature Morlet!")
