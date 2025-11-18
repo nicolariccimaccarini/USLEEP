@@ -264,21 +264,24 @@ def compute_morlet_wavelet(data, sfreq, fc=12.5, n_cycles=7):
         n_cycles: numero di cicli del wavelet
     
     Returns:
-        wavelet_complex: segnale wavelet complesso (per estrarre ampiezza e fase)
+        wavelet_signal
+
+    Formula standard: ψ(t) = A * exp(2πift) * exp(-t²/(2σ²))
+    dove σ = n_cycles / (2πf)
     """
-    # Calcola parametri bandwidth
-    s = n_cycles / (2 * np.pi * fc)
-    fb = 2 * s**2
+    # Parametro sigma (deviazione standard temporale)
+    sigma = n_cycles / (2 * np.pi * fc)
     
-    # Lunghezza della wavelet in secondi
-    wavelet_duration = n_cycles / fc
-    wavelet_samples = int(wavelet_duration * sfreq * 2)
+    # Lunghezza wavelet: ±4σ per copertura 99.99%
+    wavelet_duration = 8 * sigma  
+    wavelet_samples = int(wavelet_duration * sfreq)
     
-    # Crea morlet wavelet
-    t = np.arange(-wavelet_samples/2, wavelet_samples/2) / sfreq
-    morlet_wav = (np.pi * fb)**(-0.5) * np.exp(2j * np.pi * fc * t) * np.exp(-t**2 / fb)
+    if wavelet_samples % 2 == 0:
+        wavelet_samples += 1
     
-    # Convoluzione (mantieni risultato complesso)
+    t = np.arange(-wavelet_samples // 2, wavelet_samples // 2 + 1) / sfreq
+    A = 1.0 / (sigma * np.sqrt(np.pi))
+    morlet_wav = A * np.exp(2j * np.pi * fc * t) * np.exp(-t**2 / (2 * sigma**2))    
     wavelet_signal = np.convolve(data, morlet_wav, mode='same')
     
     return wavelet_signal
@@ -331,29 +334,33 @@ def compute_morlet_features(segments, sfreq, fc_range=[11, 12.5, 14, 15], n_cycl
     return features
 
 
-def compute_adaptive_threshold(signal, window_sec=0.1, sfreq=200, threshold_multiplier=4.5):
+def compute_adaptive_threshold(signal, window_sec=30.0, sfreq=200, percentile=95):
     """
-    Calcola threshold adattivo con media mobile
+    Calcola threshold adattivo RMS-based (come Luna)
     
     Args:
-        signal: segnale wavelet (ampiezza)
-        window_sec: finestra per media mobile (secondi)
-        sfreq: frequenza di campionamento
-        threshold_multiplier: moltiplicatore per la soglia (4.5x)
+        signal: ampiezza wavelet
+        window_sec: finestra RMS (default 30s come Luna)
+        sfreq: frequenza campionamento
+        method: 'percentile' (default Luna) o 'rms_multiplier'
+        percentile: percentile per threshold (default 95)
     
     Returns:
-        threshold_signal: array con valori di soglia adattiva
+        threshold value (scalare) o array
     """
+    from scipy.ndimage import uniform_filter1d
+    
     window_samples = int(window_sec * sfreq)
     
-    # Calcola media mobile
-    from scipy.ndimage import uniform_filter1d
-    moving_avg = uniform_filter1d(signal, size=window_samples, mode='nearest')
+    # Calcola RMS locale: sqrt(mean(signal²))
+    signal_squared = signal ** 2
+    mean_squared = uniform_filter1d(signal_squared, size=window_samples, mode='nearest')
+    rms_local = np.sqrt(mean_squared)
     
-    # Threshold = 4.5 * media mobile
-    threshold_signal = threshold_multiplier * moving_avg
-    
-    return threshold_signal
+    # Metodo Luna: usa percentile del RMS
+    threshold = np.percentile(rms_local, percentile)
+    return threshold
+
 
 
 def merge_close_spindles(regions, min_gap_sec=1.0, max_total_duration=3.0):

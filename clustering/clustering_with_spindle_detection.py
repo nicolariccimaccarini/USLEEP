@@ -7,15 +7,14 @@ import numpy as np
 import tensorflow as tf
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.models import load_model
 
 # Aggiungi il percorso utils al path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
-    compute_morlet_wavelet, compute_morlet_features,
-    compute_adaptive_threshold, merge_close_spindles,
-    mne_bandpass_filter
+    compute_morlet_wavelet, compute_adaptive_threshold, 
+    merge_close_spindles, mne_bandpass_filter
 )
 
 # Abilita deserializzazione
@@ -24,16 +23,16 @@ tf.keras.config.enable_unsafe_deserialization()
 # Configurazione
 CONFIG = {
     'window_size': 0.5,                         # Ampiezza finestra temporale (s)
-    'overlap_ratio': 0.2,                       # Percentuale sovrapposizione segmenti
+    'overlap_ratio': 0.5,                       # 50% overlap (ALLINEATO con training)
     'num_clusters': 2,                          # (spindles vs non-spindles)
-    'min_spindle_duration': 0.5,                # Durata minima spindle
-    'max_spindle_duration': 3.0,                # Durata massima spindle
-    'wavelet_fc_range': [11, 12.5, 14, 15],     # Range frequenze centrali
-    'wavelet_n_cycles': 7,                      # Numero cicli
-    'threshold_multiplier': 4.5,                # 4.5x media
-    'threshold_window_sec': 0.1,                # Finestra media mobile
-    'merge_gap_sec': 1.0,                       # Gap minimo per merge
-    'min_threshold_ratio': 0.7,                 # % campioni sopra threshold per validazione
+    'min_spindle_duration': 0.5,                # Durata minima spindle (s)
+    'max_spindle_duration': 3.0,                # Durata massima spindle (s)
+    'wavelet_fc': 13.5,                         # Frequenza centrale Morlet (Hz)
+    'wavelet_n_cycles': 7,                      # Numero cicli Morlet
+    'rms_window_sec': 30.0,                     # Finestra RMS per threshold adattivo
+    'rms_percentile': 95,                       # Percentile per threshold
+    'merge_gap_sec': 1.0,                       # Gap minimo per merge spindles
+    'min_amplitude_ratio': 0.95,                # % campioni sopra threshold RMS
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
 }
 
@@ -47,103 +46,129 @@ def load_autoencoder_with_fallback(model_path):
         return None
 
 
-def detect_continuous_regions(indices):
-    """Converte indici sparsi in regioni continue"""
-    if len(indices) == 0:
-        return []
+def extract_envelope_features(envelope_segment):
+    """
+    Estrae feature statistiche dall'envelope (IDENTICHE al training)
     
+    Args:
+        envelope_segment: array 1D di ampiezza Morlet
+    
+    Returns:
+        array di 4 feature: [mean, std, max, median]
+    """
+    return np.array([
+        np.mean(envelope_segment),
+        np.std(envelope_segment),
+        np.max(envelope_segment),
+        np.median(envelope_segment)
+    ])
+
+
+def detect_continuous_regions_from_mask(mask, step_samples, sfreq):
+    """
+    Converte maschera binaria in regioni temporali continue
+    
+    Args:
+        mask: array booleano (True = spindle)
+        step_samples: passo tra segmenti
+        sfreq: frequenza campionamento
+    
+    Returns:
+        lista di tuple (start_time, end_time)
+    """
     regions = []
-    start = indices[0]
-    prev = indices[0]
+    in_region = False
+    start_idx = 0
     
-    for idx in indices[1:]:
-        if idx != prev + 1:
-            regions.append((start, prev + 1))
-            start = idx
-        prev = idx
+    for i, is_spindle in enumerate(mask):
+        if is_spindle and not in_region:
+            start_idx = i
+            in_region = True
+        elif not is_spindle and in_region:
+            start_time = start_idx * step_samples / sfreq
+            end_time = i * step_samples / sfreq
+            regions.append((start_time, end_time))
+            in_region = False
     
-    regions.append((start, prev + 1))
+    # Chiudi ultima regione se aperta
+    if in_region:
+        start_time = start_idx * step_samples / sfreq
+        end_time = len(mask) * step_samples / sfreq
+        regions.append((start_time, end_time))
+    
     return regions
 
 
 def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
     """
-    Approccio ibrido: ML feature learning + Morlet criteria
+    Approccio ibrido ML + Morlet (nvelope-based)
     
     Pipeline:
-    1. Estrazione feature Morlet multi-scala
-    2. Segmentazione con overlap
-    3. Calcolo anomaly score (reconstruction error dell'autoencoder)
-    4. Clustering binario (spindles vs non-spindles)
-    5. Refinement con criteri Morlet (durata, threshold adattivo)
-    6. Merge spindles vicini
+    1. Morlet Wavelet Transform (fc=13.5 Hz)
+    2. Estrazione envelope (ampiezza)
+    3. Segmentazione envelope
+    4. Estrazione feature statistiche (mean, std, max, median)
+    5. Autoencoder: anomaly detection (reconstruction error)
+    6. Clustering: spindles vs non-spindles
+    7. Refinement: criteri Morlet (durata + RMS threshold)
+    8. Merge spindles vicini
     """
-    print(f"🔍 Analisi spindles IBRIDA per: {channel_name}")
+    print(f"🔍 Analisi spindles IBRIDA (Envelope) per: {channel_name}")
     
     channel_data_1d = data.flatten()
     
-    # Calcola Morlet wavelet (multi-scala per robustezza)
-    wavelet_features = []
-    for fc in CONFIG['wavelet_fc_range']:
-        wavelet_complex = compute_morlet_wavelet(channel_data_1d, sfreq, fc=fc, n_cycles=CONFIG['wavelet_n_cycles'])
-        wavelet_amp = np.abs(wavelet_complex)
-        wavelet_features.append(wavelet_amp)
+    # Morlet Wavelet Transform 
+    wavelet_complex = compute_morlet_wavelet(
+        channel_data_1d, 
+        sfreq, 
+        fc=CONFIG['wavelet_fc'],
+        n_cycles=CONFIG['wavelet_n_cycles']
+    )
     
-    # Combina feature multi-scala (media)
-    wavelet_combined = np.mean(wavelet_features, axis=0)
+    # Estrai envelope (ampiezza)
+    envelope = np.abs(wavelet_complex)
     
-    print(f"   🌊 Morlet Wavelet applicata - fc range: {CONFIG['wavelet_fc_range']} Hz")
+    print(f"   🌊 Morlet Wavelet applicata (fc={CONFIG['wavelet_fc']} Hz, {CONFIG['wavelet_n_cycles']} cycles)")
     
+    # Segmentazione envelope (STESSO metodo del training)
     segment_length = int(CONFIG['window_size'] * sfreq)
-    
-    # Segmenta il segnale wavelet
-    wavelet_reshaped = wavelet_combined.reshape(1, -1)
-    wavelet_segments_raw = segment_signal_with_overlap(
-        wavelet_reshaped,
+    envelope_reshaped = envelope.reshape(1, -1)
+    envelope_segments = segment_signal_with_overlap(
+        envelope_reshaped,
         segment_length,
         CONFIG['overlap_ratio']
     )
     
-    # Segmenta anche il segnale originale per feature extraction
-    data_segments = segment_signal_with_overlap(
-        data,
-        segment_length,
-        CONFIG['overlap_ratio']
-    )
+    print(f"   📏 Segmenti envelope: {len(envelope_segments)}")
     
-    print(f"   📏 Segmenti generati: {len(wavelet_segments_raw)}")
+    # Estrai feature da ogni segmento (IDENTICHE al training)
+    segment_features = []
+    for seg in envelope_segments:
+        seg_1d = seg.flatten()
+        features = extract_envelope_features(seg_1d)
+        segment_features.append(features)
     
-    # Estrai feature Morlet per ogni segmento
-    segment_features_list = []
-    for seg in data_segments:
-        morlet_feat = compute_morlet_features(
-            seg,
-            sfreq,
-            fc_range=CONFIG['wavelet_fc_range'],
-            n_cycles=CONFIG['wavelet_n_cycles']
-        )
-        segment_features_list.append(morlet_feat.flatten())  # flatten per singolo canale
+    segment_features = np.array(segment_features)
     
-    segment_features = np.array(segment_features_list)
-    
-    print(f"   📊 Feature Morlet estratte per segmento: {segment_features.shape}")
+    print(f"   📊 Feature estratte: {segment_features.shape}")
     
     # Normalizza features
     scaler = StandardScaler()
     features_normalized = scaler.fit_transform(segment_features)
     
-    # Reshape per encoder
-    features_reshaped = features_normalized.reshape(-1, 1, features_normalized.shape[1])
+    # Reshape per autoencoder: (n_samples, 1, 4)
+    features_reshaped = features_normalized.reshape(-1, 1, 4)
     
+    # Autoencoder prediction (reconstruction error)
     try:
         predictions = encoder.predict(features_reshaped, verbose=0)
-        
-        # Calcola reconstruction error (MSE tra input e output ricostruito)
-        reconstruction_errors = np.mean((features_reshaped - predictions)**2, axis=(1, 2))        
+        reconstruction_errors = np.mean((features_reshaped - predictions)**2, axis=(1, 2))
+        print(f"   🤖 Reconstruction error - mean: {np.mean(reconstruction_errors):.6f}, std: {np.std(reconstruction_errors):.6f}")
     except Exception as e:
-        print(f"   ⚠️ Errore prediction autoencoder: {e}")
+        print(f"   ⚠️ Errore prediction: {e}")
+        reconstruction_errors = np.zeros(len(features_normalized))
     
-    # Combina feature normalizzate + reconstruction error per clustering
+    # Clustering (combina features + reconstruction error)
     cluster_input = np.column_stack([
         features_normalized,
         reconstruction_errors.reshape(-1, 1)
@@ -152,124 +177,120 @@ def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
     kmeans = KMeans(n_clusters=CONFIG['num_clusters'], random_state=42, n_init=10)
     labels = kmeans.fit_predict(cluster_input)
     
-    # Identifica cluster spindles (quello con maggiore ampiezza wavelet media)
-    cluster_wavelet_means = []
+    # Identifica cluster spindles (maggiore ampiezza media)
+    cluster_means = []
     for cluster_id in range(CONFIG['num_clusters']):
-        cluster_mask = labels == cluster_id
-        cluster_wavelet_segments = [wavelet_segments_raw[i] for i, m in enumerate(cluster_mask) if m]
+        cluster_mask = (labels == cluster_id)
+        cluster_features = segment_features[cluster_mask]
         
-        if len(cluster_wavelet_segments) > 0:
-            cluster_mean_amp = np.mean([np.mean(seg) for seg in cluster_wavelet_segments])
+        if len(cluster_features) > 0:
+            # Usa feature 0 = mean amplitude
+            cluster_mean = np.mean(cluster_features[:, 0])
         else:
-            cluster_mean_amp = 0
+            cluster_mean = 0
         
-        cluster_wavelet_means.append(cluster_mean_amp)
+        cluster_means.append(cluster_mean)
     
-    spindle_cluster = np.argmax(cluster_wavelet_means)
+    spindle_cluster = np.argmax(cluster_means)
     
-    print(f"   🎯 Cluster identificato: {spindle_cluster} (ampiezza media: {cluster_wavelet_means[spindle_cluster]:.3f})")
-    print(f"   📊 Segmenti cluster spindle: {np.sum(labels == spindle_cluster)}/{len(labels)}")
+    print(f"   🎯 Cluster spindle: {spindle_cluster}")
+    print(f"   📊 Ampiezza media cluster 0: {cluster_means[0]:.6f}")
+    print(f"   📊 Ampiezza media cluster 1: {cluster_means[1]:.6f}")
+    print(f"   📊 Segmenti spindle: {np.sum(labels == spindle_cluster)}/{len(labels)}")
     
-    # Prendi solo i segmenti classificati come spindles
-    spindle_indices = np.where(labels == spindle_cluster)[0]
-    
-    # Converti in regioni temporali continue
-    spindle_regions = detect_continuous_regions(spindle_indices)
-    
-    # Calcola tempi reali
+    # Converti cluster in regioni temporali
+    spindle_mask = (labels == spindle_cluster)
     step_samples = int(segment_length * (1 - CONFIG['overlap_ratio']))
-    spindle_regions_time = []
     
-    for start_idx, end_idx in spindle_regions:
-        start_time = start_idx * step_samples / sfreq
-        end_time = end_idx * step_samples / sfreq
+    regions = detect_continuous_regions_from_mask(spindle_mask, step_samples, sfreq)
+    
+    print(f"   📍 Regioni iniziali: {len(regions)}")
+    
+    # Refinement con criteri Morlet
+    # Calcola threshold RMS adattivo (30s window, 95° percentile)
+    rms_threshold = compute_adaptive_threshold(
+        envelope, 
+        window_sec=CONFIG['rms_window_sec'],
+        sfreq=sfreq,
+        method='percentile',
+        percentile=CONFIG['rms_percentile']
+    )
+    
+    print(f"   🔬 Threshold RMS (95° percentile): {rms_threshold:.6f}")
+    
+    refined_regions = []
+    
+    for start_time, end_time in regions:
         duration = end_time - start_time
         
-        # CRITERIO 1: Durata 0.5-3s
         if not (CONFIG['min_spindle_duration'] <= duration <= CONFIG['max_spindle_duration']):
             continue
         
-        # CRITERIO 2: Verifica threshold adattivo sulla regione wavelet
         start_sample = int(start_time * sfreq)
         end_sample = int(end_time * sfreq)
-        end_sample = min(end_sample, len(wavelet_combined))  # safety check
+        end_sample = min(end_sample, len(envelope))
         
-        if start_sample >= len(wavelet_combined):
+        if start_sample >= len(envelope):
             continue
         
-        region_wavelet = wavelet_combined[start_sample:end_sample]
+        region_envelope = envelope[start_sample:end_sample]
         
-        if len(region_wavelet) == 0:
+        if len(region_envelope) == 0:
             continue
         
-        # Calcola threshold adattivo per questa regione
-        threshold = compute_adaptive_threshold(
-            region_wavelet,
-            window_sec=CONFIG['threshold_window_sec'],
-            sfreq=sfreq,
-            threshold_multiplier=CONFIG['threshold_multiplier']
-        )
+        above_threshold_ratio = np.sum(region_envelope > rms_threshold) / len(region_envelope)
         
-        # Verifica che almeno X% dei campioni superi threshold
-        above_threshold_ratio = np.sum(region_wavelet > threshold) / len(region_wavelet)
-        
-        if above_threshold_ratio < CONFIG['min_threshold_ratio']:
+        if above_threshold_ratio < CONFIG['min_amplitude_ratio']:
             continue
         
-        spindle_regions_time.append((start_time, end_time, above_threshold_ratio))
+        refined_regions.append((start_time, end_time, above_threshold_ratio))
     
-    print(f"   🔬 Dopo refinement Morlet: {len(spindle_regions_time)} regioni")
+    print(f"   🔬 Dopo refinement: {len(refined_regions)} regioni")
     
-    # Rimuovi la confidenza temporaneamente per merge
-    regions_for_merge = [(s, e) for s, e, _ in spindle_regions_time]
-    
+    # Merge spindles vicini
+    regions_to_merge = [(s, e) for s, e, _ in refined_regions]
     merged_regions = merge_close_spindles(
-        regions_for_merge,
+        regions_to_merge,
         min_gap_sec=CONFIG['merge_gap_sec'],
         max_total_duration=CONFIG['max_spindle_duration']
     )
     
     print(f"   🔗 Dopo merge: {len(merged_regions)} spindles")
     
-    # Creazione risultati
+    # Crea risultati finali con metriche
     results = []
     for start_time, end_time in merged_regions:
         duration = end_time - start_time
         
-        # Calcola metriche qualità sulla regione finale
         start_sample = int(start_time * sfreq)
         end_sample = int(end_time * sfreq)
-        end_sample = min(end_sample, len(wavelet_combined))
+        end_sample = min(end_sample, len(envelope))
         
-        if start_sample >= len(wavelet_combined):
+        if start_sample >= len(envelope):
             continue
         
-        region_wavelet = wavelet_combined[start_sample:end_sample]
+        region_envelope = envelope[start_sample:end_sample]
         
-        if len(region_wavelet) == 0:
+        if len(region_envelope) == 0:
             continue
         
-        # Ricalcola threshold e confidenza
-        threshold = compute_adaptive_threshold(
-            region_wavelet,
-            window_sec=CONFIG['threshold_window_sec'],
-            sfreq=sfreq,
-            threshold_multiplier=CONFIG['threshold_multiplier']
-        )
-        
-        confidence = np.sum(region_wavelet > threshold) / len(region_wavelet)
+        # Calcola metriche qualità
+        peak_amplitude = np.max(region_envelope)
+        mean_amplitude = np.mean(region_envelope)
+        confidence = np.sum(region_envelope > rms_threshold) / len(region_envelope)
         
         results.append({
             'Canale': channel_name,
             'Start_Time(s)': round(start_time, 3),
             'End_Time(s)': round(end_time, 3),
             'Duration(s)': round(duration, 3),
-            'Mean_Amplitude(µV)': round(np.mean(region_wavelet) * 1e6, 3),
-            'Max_Amplitude(µV)': round(np.max(region_wavelet) * 1e6, 3),
-            'ML_Confidence': round(confidence, 3)
+            'Peak_Amplitude(µV)': round(peak_amplitude * 1e6, 3),
+            'Mean_Amplitude(µV)': round(mean_amplitude * 1e6, 3),
+            'RMS_Threshold(µV)': round(rms_threshold * 1e6, 3),
+            'Confidence': round(confidence, 3)
         })
     
-    print(f"✅ Rilevati {len(results)} spindles finali (IBRIDO)")
+    print(f"✅ Rilevati {len(results)} spindles finali")
     
     return pd.DataFrame(results)
 
@@ -316,8 +337,8 @@ def main():
             # Filtra canali
             channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
             raw.pick_channels(channels_to_include)
-
-            raw = mne_bandpass_filter(raw, lowcut=5, highcut=35)
+            
+            print(f"   📊 Canali: {len(channels_to_include)}, Frequenza: {sfreq} Hz")
             
             # Processa ogni canale
             for channel_name in raw.ch_names:
@@ -332,9 +353,9 @@ def main():
                 if autoencoder is None:
                     continue
                 
-                print(f"   🤖 Modello caricato: {model_path}")
-                print(f"   📊 Input shape: {autoencoder.input_shape}")
-                print(f"   📊 Output shape: {autoencoder.output_shape}")
+                print(f"\n   🤖 Modello caricato: {channel_name}")
+                print(f"      Input shape: {autoencoder.input_shape}")
+                print(f"      Output shape: {autoencoder.output_shape}")
                 
                 # Estrai dati del canale
                 channel_idx = raw.ch_names.index(channel_name)
@@ -349,6 +370,7 @@ def main():
                 
                 # Pulizia memoria
                 del autoencoder
+                tf.keras.backend.clear_session()
                 gc.collect()
                 
         except Exception as e:
@@ -365,26 +387,21 @@ def main():
         final_results = final_results.sort_values(['Canale', 'Start_Time(s)'])
         
         # Salva CSV
-        csv_path = os.path.join(cluster_output_path, 'start_end_duration_hybrid.csv')
+        csv_path = os.path.join(cluster_output_path, 'start_end_per_channel.csv')
         final_results.to_csv(csv_path, index=False)
-        
-        print(f"\n🎉 Risultati salvati in: {csv_path}")
-        print(f"📈 Totale spindles rilevati: {len(final_results)}")
-        print(f"📊 Durata media: {final_results['Duration(s)'].mean():.3f}s")
-        print(f"📊 Ampiezza media: {final_results['Mean_Amplitude'].mean():.3f}")
-        print(f"📊 Confidenza media: {final_results['ML_Confidence'].mean():.3f}")
         
         print("\n📊 Riepilogo per canale:")
         summary = final_results.groupby('Canale').agg({
             'Start_Time(s)': 'count',
             'Duration(s)': ['mean', 'std'],
-            'ML_Confidence': 'mean'
+            'Mean_Amplitude(µV)': 'mean',
+            'Confidence': 'mean'
         }).round(3)
-        summary.columns = ['Count', 'Mean_Duration(s)', 'Std_Duration(s)', 'Mean_Confidence']
+        summary.columns = ['N_Spindles', 'Mean_Duration(s)', 'Std_Duration(s)', 'Mean_Amplitude(µV)', 'Mean_Confidence']
         print(summary)
         
     else:
-        print("❌ Nessun spindle rilevato")
+        print("\n❌ Nessun spindle rilevato")
 
 
 if __name__ == "__main__":
