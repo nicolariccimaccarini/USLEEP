@@ -14,7 +14,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from signal_processing import (
     get_file_output_path, segment_signal_with_overlap,
     compute_morlet_wavelet, compute_morlet_features,
-    compute_adaptive_threshold, merge_close_spindles
+    compute_adaptive_threshold, merge_close_spindles,
+    mne_bandpass_filter
 )
 
 # Abilita deserializzazione
@@ -263,8 +264,8 @@ def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
             'Start_Time(s)': round(start_time, 3),
             'End_Time(s)': round(end_time, 3),
             'Duration(s)': round(duration, 3),
-            'Mean_Amplitude': round(np.mean(region_wavelet), 3),
-            'Max_Amplitude': round(np.max(region_wavelet), 3),
+            'Mean_Amplitude(µV)': round(np.mean(region_wavelet) * 1e6, 3),
+            'Max_Amplitude(µV)': round(np.max(region_wavelet) * 1e6, 3),
             'ML_Confidence': round(confidence, 3)
         })
     
@@ -315,6 +316,8 @@ def main():
             # Filtra canali
             channels_to_include = [ch for ch in raw.ch_names if ch not in CONFIG['channels_to_exclude']]
             raw.pick_channels(channels_to_include)
+
+            raw = mne_bandpass_filter(raw, lowcut=5, highcut=35)
             
             # Processa ogni canale
             for channel_name in raw.ch_names:
