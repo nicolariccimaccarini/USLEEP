@@ -30,7 +30,7 @@ CONFIG = {
     'wavelet_fc': 13.5,                         # Frequenza centrale Morlet (Hz)
     'wavelet_n_cycles': 7,                      # Numero cicli Morlet
     'rms_window_sec': 30.0,                     # Finestra RMS per threshold adattivo
-    'rms_percentile': 95,                       # Percentile per threshold
+    'rms_percentile': 0.25,                       # Percentile per threshold
     'merge_gap_sec': 1.0,                       # Gap minimo per merge spindles
     'min_amplitude_ratio': 0.95,                # % campioni sopra threshold RMS
     'channels_to_exclude': {'EEG A1', 'EEG A2', 'Oculo', 'MK', 'ECG', 'EMG1', 'EMG2'}
@@ -212,7 +212,6 @@ def process_channel_for_spindles_hybrid(channel_name, data, sfreq, encoder):
         envelope, 
         window_sec=CONFIG['rms_window_sec'],
         sfreq=sfreq,
-        method='percentile',
         percentile=CONFIG['rms_percentile']
     )
     
