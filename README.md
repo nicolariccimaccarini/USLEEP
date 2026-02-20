@@ -1,8 +1,8 @@
-# USLEEP – Unsupervised EEG Sleep Spindle Recognition
+# USLEEP – Unsupervised Spindle Learning via EEG Patterns
 
 ## Project Overview
 
-**USLEEP** is a Python-based pipeline for the **automatic detection of sleep spindles** in EEG signals using **unsupervised learning** techniques. Sleep spindles are characteristic bursts of oscillatory neural activity (typically 12–15 Hz) occurring during NREM stage 2 sleep and are relevant biomarkers for neurological research and sleep medicine.
+**USLEEP** is a Python-based pipeline for the **automatic detection of sleep spindles** in EEG signals using **unsupervised learning** techniques. Sleep spindles are characteristic bursts of oscillatory neural activity (typically 11–16 Hz) occurring during NREM stage 2 sleep and are relevant biomarkers for neurological research and sleep medicine.
 
 The pipeline combines two core strategies:
 1. **Feature extraction via autoencoders** (including a novel Morlet wavelet-based approach)
@@ -20,9 +20,9 @@ This is the most advanced autoencoder model in the pipeline. It applies the **Mo
 
 **Key characteristics:**
 - Applies **Morlet CWT** to each EEG segment, producing a 2D time-frequency representation
-- Feeds the wavelet scalograms into a **convolutional autoencoder** (encoder–decoder architecture)
+- Feeds the wavelet scalograms into a **LSTM autoencoder** (encoder–decoder architecture)
 - The encoder's latent space captures compact, discriminative representations of EEG oscillations
-- Particularly effective at isolating the 12–15 Hz spindle frequency band from background EEG noise
+- Particularly effective at isolating the 11–16 Hz spindle frequency band from background EEG noise
 - Supports **per-channel independent processing** for multi-channel EEG recordings
 - Outputs learned embeddings to be consumed downstream by the clustering step
 
@@ -33,8 +33,8 @@ python autoencoder/autoencoder_morlet_wavelet.py
 
 **Configurable parameters:**
 ```python
-window_size   = 5      # Segment length in seconds
-overlap       = 0.10   # Overlap between consecutive windows (10%)
+window_size   = 0.5    # Segment length in seconds
+overlap       = 0.5    # Overlap between consecutive windows (10%)
 epoche        = 200    # Training epochs
 batch_size    = 16     # Batch size for training
 pazienza      = 20     # Early stopping patience
@@ -68,7 +68,7 @@ python clustering/clustering_with_spindle_detection.py
 
 **Configurable parameters:**
 ```python
-num_clusters  = 5      # Number of K-means clusters
+num_clusters  = 2      # Number of K-means clusters
 batch_size    = 8      # Batch size for embedding extraction
 n_components  = 2      # PCA components for visualization
 ```
