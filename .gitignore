@@ -4,6 +4,7 @@ env/
 winvenv/
 
 # Ignora la cartella Data
+Data
 Data/Output
 Data/Mat_Output
 Data/Edf
