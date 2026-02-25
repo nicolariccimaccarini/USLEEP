@@ -12,7 +12,7 @@
 
 ## Overview
 
-**USLEEP** is a research pipeline for **automatic sleep spindle detection** in EEG signals using unsupervised machine learning. Sleep spindles — bursts of oscillatory activity in the 11–16 Hz range occurring during NREM stage 2 sleep — are clinically relevant biomarkers for neurological research and sleep medicine.
+**USLEEP** is a research pipeline for **automatic sleep spindle detection** in EEG signals using unsupervised machine learning. Sleep spindles, bursts of oscillatory activity in the 11–16 Hz range occurring during NREM stage 2 sleep, are clinically relevant biomarkers for neurological research and sleep medicine.
 
 The pipeline combines two complementary stages:
 
@@ -30,7 +30,7 @@ EEG Recording (.edf)
         │
         ▼
 ┌───────────────────────────────┐
-│  Morlet CWT (fc = 13.5 Hz)   │  ← autoencoder_morlet_wavelet.py
+│  Morlet CWT (fc = 13.5 Hz)    │  ← autoencoder_morlet_wavelet.py
 │  Envelope extraction          │
 │  Segment features             │
 │  LSTM Autoencoder training    │
