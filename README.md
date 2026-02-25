@@ -1,82 +1,56 @@
-# USLEEP – Unsupervised Spindle Learning via EEG Patterns
+# USLEEP — Unsupervised Sleep Spindle Detection via EEG Patterns
 
-## Project Overview
-
-**USLEEP** is a Python-based pipeline for the **automatic detection of sleep spindles** in EEG signals using **unsupervised learning** techniques. Sleep spindles are characteristic bursts of oscillatory neural activity (typically 11–16 Hz) occurring during NREM stage 2 sleep and are relevant biomarkers for neurological research and sleep medicine.
-
-The pipeline combines two core strategies:
-1. **Feature extraction via autoencoders** (including a novel Morlet wavelet-based approach)
-2. **Unsupervised clustering with integrated spindle detection**
-
----
-
-## ⭐ Featured Scripts
-
-### 🔬 `autoencoder_morlet_wavelet`
-
-> **Path:** `autoencoder/autoencoder_morlet_wavelet.py`
-
-This is the most advanced autoencoder model in the pipeline. It applies the **Morlet continuous wavelet transform (CWT)** to EEG segments before feeding them into the autoencoder, enabling rich time-frequency feature extraction specifically suited for spindle-like oscillations.
-
-**Key characteristics:**
-- Applies **Morlet CWT** to each EEG segment, producing a 2D time-frequency representation
-- Feeds the wavelet scalograms into a **LSTM autoencoder** (encoder–decoder architecture)
-- The encoder's latent space captures compact, discriminative representations of EEG oscillations
-- Particularly effective at isolating the 11–16 Hz spindle frequency band from background EEG noise
-- Supports **per-channel independent processing** for multi-channel EEG recordings
-- Outputs learned embeddings to be consumed downstream by the clustering step
-
-**Typical usage:**
-```bash
-python autoencoder/autoencoder_morlet_wavelet.py
-```
-
-**Configurable parameters:**
-```python
-window_size   = 0.5    # Segment length in seconds
-overlap       = 0.5    # Overlap between consecutive windows (10%)
-epoche        = 200    # Training epochs
-batch_size    = 16     # Batch size for training
-pazienza      = 20     # Early stopping patience
-```
-
-**Output:**
-- Trained model weights saved in `Data/model/`
-- Latent-space embeddings used by the clustering step
-- Reconstruction plots saved in `Data/images/`
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow&logoColor=white" />
+  <img src="https://img.shields.io/badge/scikit--learn-1.x-f7931e?logo=scikit-learn&logoColor=white" />
+  <img src="https://img.shields.io/badge/MNE-EEG-green" />
+  <img src="https://img.shields.io/badge/License-MIT-lightgrey" />
+</p>
 
 ---
 
-### 🔍 `clustering_with_spindle_detection`
+## Overview
 
-> **Path:** `clustering/clustering_with_spindle_detection.py`
+**USLEEP** is a research pipeline for **automatic sleep spindle detection** in EEG signals using unsupervised machine learning. Sleep spindles — bursts of oscillatory activity in the 11–16 Hz range occurring during NREM stage 2 sleep — are clinically relevant biomarkers for neurological research and sleep medicine.
 
-This is the core analysis script that combines **K-means clustering** with a dedicated **spindle detection** post-processing step. It takes the latent embeddings produced by the autoencoder (typically from `autoencoder_morlet_wavelet`) and identifies which clusters correspond to sleep spindle activity.
+The pipeline combines two complementary stages:
 
-**Key characteristics:**
-- Loads pre-trained autoencoder weights and extracts latent embeddings from EEG data
-- Applies **K-means clustering** on the embedding space to group EEG segments by pattern similarity
-- Implements a **spindle-detection heuristic**: after clustering, it evaluates each cluster's frequency content and temporal characteristics to label spindle clusters automatically
-- Uses **PCA** for 2D/3D visualization of the cluster structure
-- Computes **silhouette scores** to assess clustering quality
-- Generates annotated output files marking detected spindle events with their timestamps
+1. **Feature extraction** via a Morlet wavelet-based LSTM autoencoder
+2. **Unsupervised detection** via K-means clustering with a Morlet envelope refinement step
 
-**Typical usage:**
-```bash
-python clustering/clustering_with_spindle_detection.py
+No labeled training data is required. The system learns compact time-frequency representations of EEG segments and separates spindle-like patterns from background activity through clustering and biophysical constraints.
+
+---
+
+## Pipeline Architecture
+
 ```
-
-**Configurable parameters:**
-```python
-num_clusters  = 2      # Number of K-means clusters
-batch_size    = 8      # Batch size for embedding extraction
-n_components  = 2      # PCA components for visualization
+EEG Recording (.edf)
+        │
+        ▼
+┌───────────────────────────────┐
+│  Morlet CWT (fc = 13.5 Hz)   │  ← autoencoder_morlet_wavelet.py
+│  Envelope extraction          │
+│  Segment features             │
+│  LSTM Autoencoder training    │
+└──────────────┬────────────────┘
+               │  Learned weights (.h5 per channel)
+               ▼
+┌───────────────────────────────┐
+│  Autoencoder inference        │  ← clustering_with_spindle_detection.py
+│  Reconstruction error         │
+│  K-means clustering           │
+│  Spindle cluster identification│
+│  Morlet envelope refinement   │
+│  Duration + amplitude filters │
+│  Merge adjacent events        │
+└──────────────┬────────────────┘
+               │
+               ▼
+     start_end_per_channel.csv
+     (spindle timestamps + metrics)
 ```
-
-**Output:**
-- Cluster assignment files in `Data/cluster/`
-- Visualization plots (PCA scatter, cluster waveforms) in `Data/images/clustering/`
-- Spindle event timestamps exported to `Data/cluster/<subject>/spindle_events.csv`
 
 ---
 
@@ -85,33 +59,36 @@ n_components  = 2      # PCA components for visualization
 ```
 USLEEP/
 ├── autoencoder/
-│   ├── autoencoder_morlet_wavelet.py       # ⭐ Morlet wavelet autoencoder (primary model)
-│   ├── trasformazione.py                   # Convolutional autoencoder on raw EEG segments
-│   ├── autoencoder_psd.py                  # LSTM autoencoder on Power Spectral Density
-│   ├── autoencoder_CI_psd.py               # Per-channel independent LSTM autoencoder
-│   └── autoencoder_CI_sovra_psd.py         # Per-channel autoencoder with overlapping windows
+│   ├── autoencoder_morlet_wavelet.py       # ⭐ Primary: Morlet wavelet LSTM autoencoder
+│   ├── trasformazione.py                   # Convolutional autoencoder on raw EEG
+│   ├── autoencoder_psd.py                  # LSTM autoencoder on PSD features
+│   ├── autoencoder_CI_psd.py               # Per-channel independent LSTM on PSD
+│   └── autoencoder_CI_sovra_psd.py         # Per-channel LSTM with overlapping windows
 ├── clustering/
-│   ├── clustering_with_spindle_detection.py # ⭐ Clustering + spindle detection (primary script)
-│   ├── clustering.py                        # Clustering on autoencoder-extracted features
-│   ├── clustering_no_ae.py                  # Direct clustering on raw data (no autoencoder)
-│   ├── k-means.py                           # Standalone K-means implementation
-│   └── find_K.py                            # Optimal cluster number estimation
+│   ├── clustering_with_spindle_detection.py # ⭐ Primary: Hybrid clustering + spindle detection
+│   ├── clustering.py                        # Clustering on autoencoder embeddings
+│   ├── clustering_no_ae.py                  # Clustering on raw data (no autoencoder)
+│   ├── k-means.py                           # Standalone K-means
+│   └── find_K.py                            # Elbow method for optimal K
+├── utils/
+│   └── signal_processing.py                # Shared DSP utilities (Morlet, segmentation, thresholding)
 ├── src/
-│   ├── letturaEDF.py                        # EDF file reading, segmentation, spectrum computation
-│   ├── rinonima.py                          # Sequential renaming of EDF files
-│   ├── calcolo_acc.py                       # Accuracy evaluation against ground truth labels
-│   ├── rebuild_autoencoder.py               # Utility to rebuild autoencoder from saved weights
-│   ├── h5_to_csv.py                         # Convert HDF5 output to CSV format
-│   ├── test_model.py                        # Model integrity tests
-│   └── main.py                              # Main entry point
+│   ├── main.py                             # Orchestration entry point
+│   ├── letturaEDF.py                       # EDF reading, segmentation, spectrum computation
+│   ├── calcolo_acc.py                      # Accuracy evaluation vs. ground-truth labels
+│   ├── rebuild_autoencoder.py              # Rebuild autoencoder from saved weights
+│   ├── h5_to_csv.py                        # Convert HDF5 output to CSV
+│   ├── test_model.py                       # Model integrity checks
+│   └── rinonima.py                         # Sequential renaming of EDF files
 ├── Data/
-│   ├── Edf/                                 # Raw EDF input files
-│   ├── Temp/                                # Temporary working files
-│   ├── images/                              # Output visualizations
-│   ├── model/                               # Saved model architectures
-│   ├── weigths/                             # Saved model weights
-│   └── cluster/                             # Clustering results and spindle event files
-├── requirements.txt
+│   ├── Preprocessed_Edf/                   # Input EEG recordings (.edf)
+│   ├── Output/
+│   │   ├── model/canali_individuali/       # Saved autoencoder weights (.h5 per channel)
+│   │   ├── images/                         # Training plots and visualizations
+│   │   └── cluster/                        # Detection results
+│   │       └── start_end_per_channel.csv   # ← Final spindle event output
+├── environment.yml                         # Conda environment specification
+├── requirements.txt                        # pip fallback dependencies
 └── README.md
 ```
 
@@ -119,94 +96,172 @@ USLEEP/
 
 ## Environment Setup
 
-```bash
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate          # Linux/macOS
-# venv\Scripts\activate           # Windows
+> **Conda is the recommended environment manager** for this project due to its reliable handling of compiled dependencies (`numpy`, `scipy`, `tensorflow`).
 
-# Install dependencies
+### Using Conda (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/nicolariccimaccarini/USLEEP.git
+cd USLEEP
+
+# Create the conda environment
+conda env create -f environment.yml
+
+# Activate it
+conda activate usleep
+```
+
+If `environment.yml` is not yet available, create the environment manually:
+
+```bash
+conda create -n usleep python=3.10 -y
+conda activate usleep
+
+conda install -c conda-forge numpy scipy matplotlib pandas scikit-learn -y
+pip install mne tensorflow
+```
+
+### Using pip (Alternative)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Main dependencies:**
-- `mne` – EEG/MEG data processing and EDF reading
-- `tensorflow` / `keras` – Autoencoder model training
-- `scikit-learn` – Clustering, PCA, evaluation metrics
-- `numpy`, `scipy` – Numerical computation and signal processing
-- `matplotlib` – Visualization
+### Core Dependencies
+
+| Package | Purpose |
+|---|---|
+| `mne` | EDF file I/O, EEG signal processing |
+| `tensorflow >= 2.10` | LSTM autoencoder training and inference |
+| `scikit-learn` | K-means clustering, StandardScaler |
+| `numpy`, `scipy` | Numerical computation, wavelet transforms |
+| `matplotlib` | Training curves and visualization plots |
+| `pandas` | Tabular output and CSV export |
 
 ---
 
 ## Directory Preparation
 
-Before running any script, create the expected output directory structure:
+Before running any script, create the expected output directories:
 
 ```bash
-mkdir -p Data/{Edf,Temp,images,model,weigths,cluster}
-mkdir -p Data/images/{canali_individuali,canali_individuali_sovrapposizione,clustering,clustering-No-Ae}
+mkdir -p Data/Preprocessed_Edf
+mkdir -p Data/Output/model/canali_individuali
+mkdir -p Data/Output/images
+mkdir -p Data/Output/cluster
 ```
 
----
+Place your EEG recordings (`.edf` format) in `Data/Preprocessed_Edf/`.
 
-## Execution Workflow
-
-### Step 1 – Prepare EEG data
-
-Place your EEG recordings (`.edf` format) into `Data/Edf/`. Optionally rename them sequentially:
+Optionally rename files sequentially:
 
 ```bash
 python src/rinonima.py
 ```
 
-Copy a subset for quick testing:
+---
+
+## Usage
+
+### Option A — Full Pipeline via `main.py` (Recommended)
+
+The `src/main.py` script orchestrates the entire pipeline end-to-end: autoencoder training followed by clustering and spindle detection.
 
 ```bash
-cp Data/Edf/*.edf Data/Temp/
+python src/main.py
 ```
 
-### Step 2 – Feature Extraction (Recommended: Morlet Wavelet Autoencoder)
+Environment variables can be used to override default paths:
+
+```bash
+DATA_PATH=Data/Preprocessed_Edf \
+OUTPUT_PATH=Data/Output \
+CURRENT_FILE=subject_01.edf \
+python src/main.py
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATA_PATH` | `Data/Preprocessed_Edf` | Directory containing `.edf` input files |
+| `OUTPUT_PATH` | `Data/Output` | Root directory for all outputs |
+| `CURRENT_FILE` | *(unset)* | Process a single file; if unset, processes all `.edf` files in batch |
+
+---
+
+### Option B — Step-by-Step Execution
+
+#### Step 1 — Autoencoder Training
+
+Train the Morlet wavelet LSTM autoencoder per EEG channel:
 
 ```bash
 python autoencoder/autoencoder_morlet_wavelet.py
 ```
 
-Alternative autoencoder approaches:
+This script:
+- Reads all `.edf` files from `DATA_PATH`
+- Applies Morlet CWT at 13.5 Hz to each EEG channel
+- Extracts envelope segments with 50% overlap
+- Trains one LSTM autoencoder per channel
+- Saves model weights to `OUTPUT_PATH/model/canali_individuali/autoencoder_<channel>.h5`
 
-```bash
-# Convolutional autoencoder on raw segments
-python autoencoder/trasformazione.py
+**Key parameters** (edit in script):
 
-# LSTM autoencoder on PSD features
-python autoencoder/autoencoder_psd.py
+| Parameter | Default | Description |
+|---|---|---|
+| `window_size` | `0.5` | Segment length in seconds |
+| `overlap_ratio` | `0.5` | Overlap between consecutive windows |
+| `epoche` | `200` | Maximum training epochs |
+| `batch_size` | `16` | Training batch size |
+| `pazienza` | `20` | Early stopping patience |
+| `wavelet_fc` | `13.5` | Morlet central frequency (Hz) |
+| `wavelet_n_cycles` | `7` | Number of Morlet cycles |
 
-# Per-channel independent LSTM autoencoder
-python autoencoder/autoencoder_CI_psd.py
+---
 
-# Per-channel with overlapping windows
-python autoencoder/autoencoder_CI_sovra_psd.py
-```
+#### Step 2 — Spindle Detection
 
-### Step 3 – Clustering and Spindle Detection (Recommended)
+Run the hybrid clustering and detection pipeline:
 
 ```bash
 python clustering/clustering_with_spindle_detection.py
 ```
 
-Alternative clustering approaches:
+This script:
+- Loads each per-channel autoencoder from `OUTPUT_PATH/model/canali_individuali/`
+- Applies Morlet CWT and extracts 4 statistical envelope features per segment  
+  (`mean`, `std`, `max`, `median`)
+- Concatenates features with autoencoder reconstruction error
+- Runs K-means (k=2: spindles vs. background)
+- Identifies the spindle cluster by highest mean envelope amplitude
+- Refines detections using biophysical constraints:
+  - Duration: 0.5 s – 3.0 s
+  - Amplitude: ≥ 95% of samples above adaptive RMS threshold
+- Merges adjacent spindle events (gap < 1.0 s)
+- Exports results to `OUTPUT_PATH/cluster/start_end_per_channel.csv`
 
-```bash
-# Clustering on autoencoder features (without integrated spindle detection)
-python clustering/clustering.py
+**Key parameters** (edit `CONFIG` dict):
 
-# Direct clustering on raw data (no autoencoder)
-python clustering/clustering_no_ae.py
+| Parameter | Default | Description |
+|---|---|---|
+| `window_size` | `0.5` | Segment length (must match training) |
+| `overlap_ratio` | `0.5` | Overlap ratio (must match training) |
+| `num_clusters` | `2` | K-means clusters (spindle vs. background) |
+| `min_spindle_duration` | `0.5` | Minimum spindle duration (s) |
+| `max_spindle_duration` | `3.0` | Maximum spindle duration (s) |
+| `wavelet_fc` | `13.5` | Morlet central frequency (Hz) |
+| `rms_percentile` | `0.25` | Adaptive threshold percentile |
+| `min_amplitude_ratio` | `0.95` | Fraction of samples above RMS threshold |
+| `merge_gap_sec` | `1.0` | Max gap to merge adjacent spindles (s) |
 
-# Find optimal number of clusters K
-python clustering/find_K.py
-```
+---
 
-### Step 4 – Evaluate Results
+#### Step 3 — Evaluate Results
+
+Compare detected spindles against ground-truth annotations:
 
 ```bash
 python src/calcolo_acc.py
@@ -214,50 +269,66 @@ python src/calcolo_acc.py
 
 ---
 
-## Configurable Parameters
+## Output Format
 
-The following key parameters can be adjusted in the respective scripts:
+The primary output is `Data/Output/cluster/start_end_per_channel.csv`:
 
-| Parameter     | Default | Description                            |
-|---------------|---------|----------------------------------------|
-| `window_size` | `5`     | EEG segment length in seconds          |
-| `overlap`     | `0.10`  | Overlap ratio between windows (10%)    |
-| `epoche`      | `200`   | Number of training epochs              |
-| `batch_size`  | `16`    | Batch size during training             |
-| `num_clusters`| `5`     | Number of K-means clusters             |
-| `pazienza`    | `20`    | Early stopping patience (epochs)       |
+| Column | Description |
+|---|---|
+| `Canale` | EEG channel name |
+| `Start_Time(s)` | Spindle onset (seconds from recording start) |
+| `End_Time(s)` | Spindle offset (seconds) |
+| `Duration(s)` | Event duration |
+| `Peak_Amplitude(µV)` | Peak Morlet envelope amplitude |
+| `Mean_Amplitude(µV)` | Mean Morlet envelope amplitude |
+| `RMS_Threshold(µV)` | Adaptive RMS threshold applied |
+| `Confidence` | Fraction of samples exceeding threshold |
 
 ---
 
-## Output Locations
+## Alternative Approaches
 
-| Artifact                    | Path                                        |
-|-----------------------------|---------------------------------------------|
-| Training plots & waveforms  | `Data/images/`                              |
-| Saved model architectures   | `Data/model/`                               |
-| Saved model weights         | `Data/weigths/`                             |
-| Cluster assignments         | `Data/cluster/`                             |
-| Spindle event timestamps    | `Data/cluster/<subject>/spindle_events.csv` |
+USLEEP includes additional scripts for experimental comparison:
+
+| Script | Approach |
+|---|---|
+| `autoencoder/autoencoder_psd.py` | LSTM autoencoder on Power Spectral Density |
+| `autoencoder/autoencoder_CI_psd.py` | Per-channel PSD LSTM autoencoder |
+| `autoencoder/trasformazione.py` | Convolutional autoencoder on raw EEG segments |
+| `clustering/clustering.py` | Clustering on latent embeddings (no detection refinement) |
+| `clustering/clustering_no_ae.py` | Direct clustering on raw signal (no autoencoder) |
+| `clustering/find_K.py` | Elbow + silhouette method for optimal K selection |
+
+The `autoencoder_morlet_wavelet` + `clustering_with_spindle_detection` combination is the recommended and most accurate pipeline.
 
 ---
 
 ## Troubleshooting
 
-| Issue                   | Solution                                                             |
-|-------------------------|----------------------------------------------------------------------|
-| **Out of memory**       | Reduce `batch_size` or `window_size`                                 |
-| **Corrupted EDF files** | Check file integrity using `src/test_model.py`                       |
-| **Path errors**         | Ensure all required directories exist (see *Directory Preparation*)  |
-| **GPU issues**          | Force CPU mode: `os.environ['CUDA_VISIBLE_DEVICES'] = '-1'`          |
-| **TF serialization**    | Already handled via `tf.keras.config.enable_unsafe_deserialization()` |
+| Issue | Solution |
+|---|---|
+| **Out of memory** | Reduce `batch_size` or `window_size` in the autoencoder config |
+| **Model not found for channel** | Ensure Step 1 (autoencoder training) completed for all channels |
+| **window_size`/`overlap_ratio` mismatch** | Both scripts must use identical values; defaults are pre-aligned |
+| **Corrupted or unreadable EDF** | Validate files with `src/test_model.py` |
+| **Path errors** | Verify all output directories exist (see *Directory Preparation*) |
+| **GPU/CUDA errors** | Force CPU: add `os.environ['CUDA_VISIBLE_DEVICES'] = '-1'` at script start |
+| **TensorFlow serialization warning** | Handled automatically via `tf.keras.config.enable_unsafe_deserialization()` |
 
 ---
 
-## Notes
+## Research Context
 
-This project implements multiple strategies for automatic sleep spindle recognition, enabling systematic comparison between:
-- **Raw signal approaches** (direct clustering without feature extraction)
-- **Spectral approaches** (PSD-based LSTM autoencoders)
-- **Time-frequency approaches** (Morlet wavelet convolutional autoencoders — recommended)
+This project explores fully unsupervised spindle detection using multiple paradigms:
 
-The `autoencoder_morlet_wavelet` + `clustering_with_spindle_detection` pipeline represents the most complete and accurate approach for spindle detection in this repository.
+- **Raw signal approaches** — direct clustering without feature extraction
+- **Spectral approaches** — PSD-based LSTM autoencoders
+- **Time-frequency approaches** — Morlet wavelet envelope autoencoders *(recommended)*
+
+The Morlet wavelet approach is specifically suited to spindle detection because it isolates the 11–16 Hz oscillatory band while preserving temporal dynamics, providing richer representations than static PSD features.
+
+---
+
+## License
+
+This project is released under the [MIT License](LICENSE).
