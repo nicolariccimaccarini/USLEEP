@@ -1,4 +1,4 @@
-# USLEEP — Unsupervised Sleep Spindle Detection via EEG Patterns
+# USLEEP — Unsupervised Spindle Learning via EEG Patterns
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white" />
