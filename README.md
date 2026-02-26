@@ -331,4 +331,4 @@ The Morlet wavelet approach is specifically suited to spindle detection because 
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+This project is released under the [MIT License](LICENSE.md).
