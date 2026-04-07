@@ -324,7 +324,7 @@ def calc_ritardo_interemisferico(spindles_df: pd.DataFrame) -> dict:
           Il ritardo della coppia è la media di tutti i ritardi delle coppie sovrapposte.
           Se non esiste alcuna sovrapposizione → NA per quella coppia (spindles asimmetrici)
       - Il valore globale è la media dei ritardi non-NA su tutte le coppie disponibili
-      - % NA = proporzione di coppie senza sovrapposizioni (fisiologico ≤ 30%)
+      - % NA = NA% = (tot_spindles_nelle_coppie - coppie_trovate × 2) / tot_spindles_nelle_coppie (fisiologico ≤ 30%)
 
     Restituisce un dict con:
       'globale'           : float o None  (media ritardi non-NA tra coppie)
@@ -369,16 +369,25 @@ def calc_ritardo_interemisferico(spindles_df: pd.DataFrame) -> dict:
     per_coppia = {}
     ritardi_validi = []
 
+    # Contatori per NA% basata su spindles (non su coppie di canali)
+    tot_spindles_nelle_coppie = 0  # spindles totali sui canali delle 4 coppie
+    tot_spindles_accoppiati   = 0  # spindles che hanno trovato un omologo sovrapposto
+
     for sx, dx in COPPIE_INTEREMISFERICHE:
         sp_sx = spindles_df[spindles_df["Canale"] == sx].copy()
         sp_dx = spindles_df[spindles_df["Canale"] == dx].copy()
+        n_sx  = len(sp_sx)
+        n_dx  = len(sp_dx)
+        tot_spindles_nelle_coppie += n_sx + n_dx
 
-        # Se uno dei due canali non ha spindles → NA
+        # Se uno dei due canali non ha spindles → tutti asimmetrici
         if sp_sx.empty or sp_dx.empty:
             per_coppia[f"{sx}/{dx}"] = {
-                "ritardo": None,
+                "ritardo":           None,
                 "n_sovrapposizioni": 0,
-                "ritardi_singoli": [],
+                "n_sx":              n_sx,
+                "n_dx":              n_dx,
+                "ritardi_singoli":   [],
             }
             continue
 
@@ -389,9 +398,11 @@ def calc_ritardo_interemisferico(spindles_df: pd.DataFrame) -> dict:
         if not coppie_sovrapposte:
             # Nessuna sovrapposizione → spindles asimmetrici → NA
             per_coppia[f"{sx}/{dx}"] = {
-                "ritardo": None,
+                "ritardo":           None,
                 "n_sovrapposizioni": 0,
-                "ritardi_singoli": [],
+                "n_sx":              n_sx,
+                "n_dx":              n_dx,
+                "ritardi_singoli":   [],
             }
             continue
 
@@ -402,25 +413,38 @@ def calc_ritardo_interemisferico(spindles_df: pd.DataFrame) -> dict:
         per_coppia[f"{sx}/{dx}"] = {
             "ritardo":           ritardo_medio,
             "n_sovrapposizioni": len(coppie_sovrapposte),
+            "n_sx":              n_sx,
+            "n_dx":              n_dx,
             "ritardi_singoli":   ritardi_coppia,
         }
         ritardi_validi.append(ritardo_medio)
+        # Ogni sovrapposizione "consuma" 2 spindles (uno SX + uno DX)
+        tot_spindles_accoppiati += len(coppie_sovrapposte) * 2
 
-    na_count   = sum(1 for v in per_coppia.values() if v["ritardo"] is None)
-    tot_coppie = len(per_coppia)
-    perc_na    = (na_count / tot_coppie * 100) if tot_coppie > 0 else 100.0
+    # NA% = spindles non accoppiati / spindles totali nei canali delle coppie
+    # Formula tutor: (tot_spindles_nelle_coppie - coppie_trovate*2) / tot_spindles_nelle_coppie
+    if tot_spindles_nelle_coppie > 0:
+        spindles_na = tot_spindles_nelle_coppie - tot_spindles_accoppiati
+        perc_na     = spindles_na / tot_spindles_nelle_coppie * 100
+    else:
+        spindles_na = 0
+        perc_na     = 100.0
 
     nota = (f"% NA = {perc_na:.1f}% "
-            f"({'fisiologico' if perc_na <= 30 else 'ATTENZIONE: > 30%'})")
+            f"({'fisiologico' if perc_na <= 30 else 'ATTENZIONE: > 30%'}) "
+            f"| spindles accoppiati: {tot_spindles_accoppiati}, "
+            f"non accoppiati: {spindles_na}, "
+            f"totale nei canali delle coppie: {tot_spindles_nelle_coppie}")
 
     return {
-        "globale":     float(np.mean(ritardi_validi)) if ritardi_validi else None,
-        "per_coppia":  per_coppia,
-        "na_count":    na_count,
-        "tot_coppie":  tot_coppie,
-        "perc_na":     perc_na,
-        "applicabile": True,
-        "nota":        nota,
+        "globale":                    float(np.mean(ritardi_validi)) if ritardi_validi else None,
+        "per_coppia":                 per_coppia,
+        "tot_spindles_nelle_coppie":  tot_spindles_nelle_coppie,
+        "tot_spindles_accoppiati":    tot_spindles_accoppiati,
+        "spindles_na":                spindles_na,
+        "perc_na":                    perc_na,
+        "applicabile":                True,
+        "nota":                       nota,
     }
 
 
@@ -494,25 +518,40 @@ def build_output_rows(phase: dict, global_only: bool = False) -> list[list]:
     # Dettaglio ritardo per coppia omologa
     rows.append(["--- RITARDO INTEREMISFERICO PER COPPIA (s) ---"])
     if not rit["applicabile"]:
-        rows.append(["Non applicabile", rit["nota"], ""])
+        rows.append(["Non applicabile", rit["nota"], "", "", ""])
     else:
-        rows.append(["Coppia", "Ritardo medio (DX - SX, s)",
-                     "N sovrapposizioni", "Interpretazione"])
+        rows.append([
+            "Coppia",
+            "Ritardo medio (DX - SX, s)",
+            "N spindles SX", "N spindles DX",
+            "N sovrapposizioni (accoppiati)",
+            "Interpretazione",
+        ])
         for coppia, info in rit["per_coppia"].items():
             ritardo = info["ritardo"]
             n_sovr  = info["n_sovrapposizioni"]
+            n_sx    = info["n_sx"]
+            n_dx    = info["n_dx"]
             if ritardo is None:
-                motivo = ("nessun fuso nel canale omologo" if n_sovr == 0
-                          and spindles_df[spindles_df["Canale"].isin(
-                              coppia.split("/"))].empty
+                motivo = ("nessun fuso in uno dei due canali"
+                          if n_sx == 0 or n_dx == 0
                           else "spindles asimmetrici (nessuna sovrapposizione)")
-                rows.append([coppia, "NA", n_sovr, motivo])
+                rows.append([coppia, "NA", n_sx, n_dx, n_sovr, motivo])
             else:
                 interp = ("SX anticipa DX" if ritardo > 0
                           else ("DX anticipa SX" if ritardo < 0 else "sincroni"))
-                rows.append([coppia, f"{ritardo:.4f}", n_sovr, interp])
-        rows.append([f"% NA = {rit['perc_na']:.1f}%",
-                     "fisiologico se <= 30%", "", ""])
+                rows.append([coppia, f"{ritardo:.4f}", n_sx, n_dx, n_sovr, interp])
+
+        # Riepilogo NA% basata su spindles
+        rows.append([])
+        rows.append([
+            "Riepilogo NA%",
+            f"Spindles totali nei canali delle coppie: {rit['tot_spindles_nelle_coppie']}",
+            f"Accoppiati: {rit['tot_spindles_accoppiati']}",
+            f"Non accoppiati (NA): {rit['spindles_na']}",
+            f"% NA = {rit['perc_na']:.1f}%",
+            "fisiologico se <= 30%",
+        ])
     rows.append([])
 
     # ── metriche PER CANALE (opzionale) ─────────────────────────────────
