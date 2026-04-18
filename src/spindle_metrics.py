@@ -176,6 +176,16 @@ def parse_input_file(filepath: str) -> list[dict]:
     return results
 
 
+# Ordine standard dei 19 canali (come da montaggio 10-20 usato nella distribuzione spaziale)
+CANALI_STANDARD_ORDINE = [
+    "FP1", "FP2",
+    "F7",  "F3",  "FZ",  "F4",  "F8",
+    "T3",  "C3",  "CZ",  "C4",  "T4",
+    "T5",  "P3",  "PZ",  "P4",  "T6",
+    "O1",  "O2",
+]
+
+
 # ─────────────────────────────────────────────
 # Calcolo metriche
 # ─────────────────────────────────────────────
@@ -226,6 +236,45 @@ def calc_durata(spindles_df: pd.DataFrame,
         "max": sub.max(),
         "mean": sub.mean(),
         "std":  sub.std() if len(sub) > 1 else 0.0,
+    }
+
+
+
+def calc_spindle_time_percentage(spindles_df: pd.DataFrame,
+                                  durata_nrem_s: float) -> float | None:
+    """
+    Percentuale di Spindle Time (Spindle Time %).
+
+    Definizione:
+      (somma delle durate di tutti gli spindles su tutti i canali) / durata_N2_s * 100
+
+    Nota: ogni spindle viene contato per il canale su cui è annotato, quindi
+    se uno stesso evento appare su N canali contribuisce N volte alla somma
+    (coerente con il metodo di annotazione multicanale).
+    """
+    if durata_nrem_s is None or durata_nrem_s <= 0 or spindles_df.empty:
+        return None
+    return spindles_df["Duration_s"].sum() / durata_nrem_s * 100
+
+
+def calc_distribuzione_spaziale(spindles_df: pd.DataFrame) -> dict:
+    """
+    Distribuzione spaziale dei fusi del sonno.
+
+    Per ogni canale del montaggio standard (19 canali):
+      % canale = N_spindles_canale / N_spindles_totali * 100
+
+    Restituisce un dict {canale: percentuale | None} per tutti i 19 canali standard.
+    I canali non presenti nel dataframe ricevono 0.0%.
+    """
+    n_tot = len(spindles_df)
+    if n_tot == 0:
+        return {ch: 0.0 for ch in CANALI_STANDARD_ORDINE}
+
+    conteggi = spindles_df["Canale"].value_counts()
+    return {
+        ch: round(conteggi.get(ch, 0) / n_tot * 100, 2)
+        for ch in CANALI_STANDARD_ORDINE
     }
 
 
@@ -324,7 +373,7 @@ def calc_ritardo_interemisferico(spindles_df: pd.DataFrame) -> dict:
           Il ritardo della coppia è la media di tutti i ritardi delle coppie sovrapposte.
           Se non esiste alcuna sovrapposizione → NA per quella coppia (spindles asimmetrici)
       - Il valore globale è la media dei ritardi non-NA su tutte le coppie disponibili
-      - % NA = NA% = (tot_spindles_nelle_coppie - coppie_trovate × 2) / tot_spindles_nelle_coppie (fisiologico ≤ 30%)
+      - % NA = proporzione di coppie senza sovrapposizioni (fisiologico ≤ 30%)
 
     Restituisce un dict con:
       'globale'           : float o None  (media ritardi non-NA tra coppie)
@@ -505,6 +554,15 @@ def build_output_rows(phase: dict, global_only: bool = False) -> list[list]:
         f"media 10% ISI più bassi su {n_idonei} canali con >= {ISI_MIN_FUSI} fusi",
     ])
 
+    # Spindle Time %
+    stp = calc_spindle_time_percentage(spindles_df, durata_nrem_s)
+    rows.append([
+        "Spindle Time (%)",
+        f"{stp:.4f}" if stp is not None else "N/A",
+        f"= somma durate spindles ({spindles_df['Duration_s'].sum():.3f} s) / durata N2 ({durata_nrem_s:.3f} s) * 100"
+        if stp is not None else "",
+    ])
+
     # Ritardo interemisferico
     rit = calc_ritardo_interemisferico(spindles_df)
     rit_glob = rit["globale"]
@@ -585,6 +643,26 @@ def build_output_rows(phase: dict, global_only: bool = False) -> list[list]:
                 f"{isi_c:.4f}" if isi_c is not None else f"N/A (< {ISI_MIN_FUSI} fusi)",
                 emisfero,
             ])
+
+    # ── distribuzione spaziale ──────────────────────────────────────────
+    rows.append([])
+    rows.append(["--- DISTRIBUZIONE SPAZIALE ---"])
+    rows.append(["Canale", "N spindles", "% sul totale", "Emisfero"])
+
+    distr = calc_distribuzione_spaziale(spindles_df)
+    n_tot_sp = len(spindles_df)
+    for canale in CANALI_STANDARD_ORDINE:
+        n_ch = int(spindles_df[spindles_df["Canale"] == canale].shape[0])
+        perc = distr[canale]
+        emisfero = ("SX" if canale in EMISFERO_SX
+                    else ("DX" if canale in EMISFERO_DX else "Centrale/Mediano"))
+        rows.append([
+            canale,
+            n_ch,
+            f"{perc:.2f}" if n_ch > 0 else "0.00",
+            emisfero,
+        ])
+    rows.append(["TOTALE", n_tot_sp, "100.00", ""])
 
     return rows
 
