@@ -241,20 +241,43 @@ def calc_durata(spindles_df: pd.DataFrame,
 
 
 def calc_spindle_time_percentage(spindles_df: pd.DataFrame,
-                                  durata_nrem_s: float) -> float | None:
+                                  durata_nrem_s: float) -> dict | None:
     """
     Percentuale di Spindle Time (Spindle Time %).
 
-    Definizione:
-      (somma delle durate di tutti gli spindles su tutti i canali) / durata_N2_s * 100
+    Definizione corretta:
+      Tempo totale coperto da almeno uno spindle (su qualsiasi canale) / durata_N2 * 100
 
-    Nota: ogni spindle viene contato per il canale su cui è annotato, quindi
-    se uno stesso evento appare su N canali contribuisce N volte alla somma
-    (coerente con il metodo di annotazione multicanale).
+    Metodo: union of intervals.
+      Gli spindles simultanei su canali diversi rappresentano lo stesso evento biologico
+      visto da elettrodi diversi. Sommare le durate canale per canale conterebbe più volte
+      lo stesso secondo di attività cerebrale, gonfiando il risultato.
+      Si uniscono quindi tutti gli intervalli [Start_s, End_s] di tutti i canali,
+      si fondono quelli sovrapposti (merge), e si misura il tempo totale coperto.
+
+    Restituisce un dict con:
+      'percentuale'     : float (%)
+      'tempo_coperto_s' : float (secondi effettivamente coperti dopo merge)
+      'n_intervalli'    : int   (numero di intervalli distinti dopo merge)
     """
     if durata_nrem_s is None or durata_nrem_s <= 0 or spindles_df.empty:
         return None
-    return spindles_df["Duration_s"].sum() / durata_nrem_s * 100
+
+    # Ordina tutti gli intervalli per Start_s e fai il merge
+    intervals = sorted(zip(spindles_df["Start_s"].values, spindles_df["End_s"].values))
+    merged = []
+    for start, end in intervals:
+        if merged and start < merged[-1][1]:          # sovrapposizione: estendi
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append([start, end])
+
+    tempo_coperto = sum(e - s for s, e in merged)
+    return {
+        "percentuale":     tempo_coperto / durata_nrem_s * 100,
+        "tempo_coperto_s": tempo_coperto,
+        "n_intervalli":    len(merged),
+    }
 
 
 def calc_distribuzione_spaziale(spindles_df: pd.DataFrame) -> dict:
@@ -556,12 +579,15 @@ def build_output_rows(phase: dict, global_only: bool = False) -> list[list]:
 
     # Spindle Time %
     stp = calc_spindle_time_percentage(spindles_df, durata_nrem_s)
-    rows.append([
-        "Spindle Time (%)",
-        f"{stp:.4f}" if stp is not None else "N/A",
-        f"= somma durate spindles ({spindles_df['Duration_s'].sum():.3f} s) / durata N2 ({durata_nrem_s:.3f} s) * 100"
-        if stp is not None else "",
-    ])
+    if stp is not None:
+        rows.append([
+            "Spindle Time (%)",
+            f"{stp['percentuale']:.4f}",
+            (f"= {stp['tempo_coperto_s']:.3f} s coperti (union of intervals, "
+             f"{stp['n_intervalli']} intervalli distinti) / {durata_nrem_s:.3f} s N2 * 100"),
+        ])
+    else:
+        rows.append(["Spindle Time (%)", "N/A", ""])
 
     # Ritardo interemisferico
     rit = calc_ritardo_interemisferico(spindles_df)
